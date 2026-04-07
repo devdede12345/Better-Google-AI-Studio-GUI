@@ -1,31 +1,19 @@
 /* ───────────────────────────────────────────────────────────
    Aether — Google AI Studio Enhancer
-   Master-container structural wrapping
+   Pure tagging — Zero-Clip collapse strategy
    ─────────────────────────────────────────────────────────── */
 
 
-/* ── Master container ───────────────────────────────────────────────── */
+/* ── Thread line on user turn (top of group) ──────────────────────── */
 
-.aether-master-container {
-  position: relative;
-  border-radius: 8px;
-  transition:
-    max-height 300ms cubic-bezier(0.4, 0, 0.2, 1),
-    background 200ms ease,
-    border-color 200ms ease;
-}
-
-
-/* ── Left thread line (full height) ─────────────────────────────────── */
-
-.aether-master-container::before {
+.aether-turn-unit::before {
   content: '';
   position: absolute;
   left: 0;
   top: 0;
-  bottom: 0;
+  bottom: -4px;
   width: 3px;
-  border-radius: 3px;
+  border-radius: 3px 3px 0 0;
   background: rgba(255, 255, 255, 0.08);
   pointer-events: none;
   z-index: 5;
@@ -34,33 +22,41 @@
     box-shadow 220ms ease;
 }
 
-.aether-master-container:hover::before {
+/* Thread line continues on model parts */
+.aether-can-hide::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -4px;
+  bottom: -4px;
+  width: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  z-index: 5;
+  transition:
+    background 220ms ease,
+    box-shadow 220ms ease;
+}
+
+/* Last model part closes the thread line */
+.aether-can-hide:last-of-type::before {
+  bottom: 0;
+  border-radius: 0 0 3px 3px;
+}
+
+/* Ensure model parts are positioned for ::before */
+.aether-can-hide {
+  position: relative;
+}
+
+/* Hover glow on user element → brighten all thread lines in group */
+.aether-turn-unit:hover::before {
   background: rgba(255, 255, 255, 0.22);
   box-shadow: 0 0 6px rgba(255, 255, 255, 0.10);
 }
 
 
-/* ── Round separator after container ───────────────────────────────── */
-
-.aether-master-container::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 16px;
-  right: 16px;
-  height: 1px;
-  background: linear-gradient(
-    to right,
-    transparent,
-    rgba(255, 255, 255, 0.06) 20%,
-    rgba(255, 255, 255, 0.06) 80%,
-    transparent
-  );
-  pointer-events: none;
-}
-
-
-/* ── Action bar (fold + branch) ─────────────────────────────────────── */
+/* ── Action bar (lives inside .aether-turn-unit) ─────────────────── */
 
 .aether-action-bar {
   position: absolute;
@@ -75,12 +71,12 @@
   pointer-events: none;
 }
 
-.aether-master-container:hover .aether-action-bar {
+.aether-turn-unit:hover .aether-action-bar {
   opacity: 1;
 }
 
 
-/* ── Shared button base ──────────────────────────────────────────────── */
+/* ── Shared button base ──────────────────────────────────────────── */
 
 .aether-fold-btn,
 .aether-branch-btn {
@@ -102,7 +98,7 @@
 }
 
 
-/* ── Fold button ─────────────────────────────────────────────────────── */
+/* ── Fold button ─────────────────────────────────────────────────── */
 
 .aether-fold-btn {
   padding: 3px 6px;
@@ -121,7 +117,7 @@
 }
 
 
-/* ── Branch button ───────────────────────────────────────────────────── */
+/* ── Branch button ───────────────────────────────────────────────── */
 
 .aether-branch-btn {
   padding: 4px 12px 4px 8px;
@@ -162,64 +158,53 @@
 }
 
 
-/* ── Collapsed state (.is-collapsed) ───────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════
+   Zero-Clip Collapse — NO max-height / overflow on any container.
+   Only .aether-can-hide gets display:none; user content untouched.
+   ══════════════════════════════════════════════════════════════════════ */
 
-/* Container: no height limit, user content drives height */
-.aether-master-container.is-collapsed {
-  max-height: none !important;
-  overflow: visible !important;
-  border-left: 4px solid #4285f4 !important;
-  padding-bottom: 10px;
-}
-
-/* User part: ALWAYS fully visible */
-.aether-master-container.is-collapsed .aether-user-part {
-  display: block !important;
-  opacity: 1 !important;
-  height: auto !important;
-}
-
-/* Model parts: completely hidden */
-.aether-master-container.is-collapsed .aether-model-part {
+/* Model parts: hidden when .aether-hidden is toggled by JS */
+.aether-can-hide.aether-hidden {
   display: none !important;
 }
 
-/* Thread line becomes a strong accent */
-.aether-master-container.is-collapsed::before {
-  background: #4285f4;
-  width: 0; /* hidden — the border-left takes over */
+/* User part in collapsed state: guaranteed visible */
+.aether-keep-visible {
+  display: block !important;
+  opacity: 1 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
 }
 
-/* Hide separator */
-.aether-master-container.is-collapsed::after {
-  display: none;
+/* Collapsed user element: visual accent */
+.aether-turn-unit.is-collapsed {
+  border-left: 4px solid #4285f4 !important;
+  padding-bottom: 15px;
 }
 
-/* Keep action bar visible (it lives inside .aether-user-part) */
-.aether-master-container.is-collapsed .aether-action-bar {
+/* Collapsed: thread line hidden (border-left takes over) */
+.aether-turn-unit.is-collapsed::before {
+  width: 0;
+}
+
+/* Collapsed: keep action bar fully visible */
+.aether-turn-unit.is-collapsed .aether-action-bar {
   opacity: 1;
 }
 
 
-/* ── Light mode ───────────────────────────────────────────────────────── */
+/* ── Light mode ──────────────────────────────────────────────────── */
 
 @media (prefers-color-scheme: light) {
-  .aether-master-container::before {
+  .aether-turn-unit::before,
+  .aether-can-hide::before {
     background: rgba(0, 0, 0, 0.06);
   }
-  .aether-master-container:hover::before {
+
+  .aether-turn-unit:hover::before {
     background: rgba(0, 0, 0, 0.16);
     box-shadow: 0 0 4px rgba(0, 0, 0, 0.06);
-  }
-
-  .aether-master-container::after {
-    background: linear-gradient(
-      to right,
-      transparent,
-      rgba(0, 0, 0, 0.05) 20%,
-      rgba(0, 0, 0, 0.05) 80%,
-      transparent
-    );
   }
 
   .aether-fold-btn {
@@ -243,10 +228,7 @@
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.10);
   }
 
-  .aether-master-container.is-collapsed {
+  .aether-turn-unit.is-collapsed {
     border-left-color: #1a73e8 !important;
-  }
-  .aether-master-container.is-collapsed::before {
-    width: 0;
   }
 }

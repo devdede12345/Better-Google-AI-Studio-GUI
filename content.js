@@ -1,20 +1,24 @@
 /**
  * Aether — Google AI Studio Enhancer
- * Wraps User + Thoughts + Output into a structural master container.
- * Provides Branch + Fold controls. Captures streaming orphans.
+ * Pure tagging approach — NO DOM wrapping / appendChild.
+ * Tags user turns with .aether-turn-unit + .aether-keep-visible
+ * Tags model turns with .aether-can-hide
+ * Fold toggles .aether-hidden on model siblings via shared group ID.
  */
 (function () {
   'use strict';
 
   // ── Config ──────────────────────────────────────────────────────────────────
-  const CONTAINER  = 'aether-master-container';
-  const COLLAPSED  = 'is-collapsed';
+  const UNIT_CLS   = 'aether-turn-unit';      // anchor class on user element
+  const KEEP_CLS   = 'aether-keep-visible';    // user content — never hidden
+  const HIDEABLE   = 'aether-can-hide';        // model content — hideable
+  const HIDDEN_CLS = 'aether-hidden';          // actively hidden right now
+  const COLLAPSED  = 'is-collapsed';           // state flag on user element
   const PROCESSED  = 'data-aether-processed';
-  const USER_PART  = 'aether-user-part';
-  const MODEL_PART = 'aether-model-part';
+  const GROUP_ATTR = 'data-aether-group';
   let groupCount   = 0;
 
-  // Turn-level selectors (tried in order; first with ≥2 hits wins)
+  // Turn-level selectors (first with ≥2 hits wins)
   const TURN_SELECTORS = [
     'ms-chat-turn',
     '.conversation-turn',
@@ -48,11 +52,9 @@
     return [];
   }
 
-  // ── Build groups: User + everything until next User ───────────────────
+  // ── Build groups: [userEl, ...modelEls] ─────────────────────────────────
   function buildGroups() {
-    const turns = findTurns().filter(
-      el => !el.hasAttribute(PROCESSED) && !el.closest('.' + CONTAINER)
-    );
+    const turns = findTurns().filter(el => !el.hasAttribute(PROCESSED));
     if (turns.length < 2) return [];
 
     const groups = [];
@@ -70,8 +72,8 @@
     return groups;
   }
 
-  // ── Action bar ────────────────────────────────────────────────────────────
-  function createActionBar(container) {
+  // ── Action bar (injected into user element) ─────────────────────────────
+  function createActionBar(userEl, groupId) {
     const bar = document.createElement('div');
     bar.className = 'aether-action-bar';
 
@@ -84,7 +86,11 @@
     fold.addEventListener('click', e => {
       e.stopPropagation();
       e.preventDefault();
-      const collapsed = container.classList.toggle(COLLAPSED);
+      const collapsed = userEl.classList.toggle(COLLAPSED);
+      // Toggle visibility on all model parts in this group
+      document.querySelectorAll(
+        `.${HIDEABLE}[${GROUP_ATTR}="${groupId}"]`
+      ).forEach(m => m.classList.toggle(HIDDEN_CLS, collapsed));
       fold.querySelector('.aether-fold-icon').textContent = collapsed ? '◀️' : '🔽';
       fold.title = collapsed ? 'Expand this turn' : 'Collapse this turn';
     });
@@ -100,9 +106,9 @@
       e.preventDefault();
       branch.classList.add('aether-branch-btn--active');
       setTimeout(() => branch.classList.remove('aether-branch-btn--active'), 500);
-      console.info('[Aether] Branch from group', container.getAttribute('data-aether-group'));
+      console.info('[Aether] Branch from group', groupId);
       document.dispatchEvent(new CustomEvent('aether:branch', {
-        detail: { container }, bubbles: true,
+        detail: { groupId, userEl }, bubbles: true,
       }));
     });
 
@@ -111,74 +117,66 @@
     return bar;
   }
 
-  // ── Wrap a group ───────────────────────────────────────────────────────────
-  function wrapGroup(members) {
+  // ── Tag a group (no DOM movement) ──────────────────────────────────────
+  function tagGroup(members) {
     const id = ++groupCount;
-    const first = members[0];
-    const parent = first.parentNode;
+    const userEl = members[0];
 
-    const container = document.createElement('div');
-    container.className = CONTAINER;
-    container.setAttribute('data-aether-group', String(id));
-
-    // Insert container at first member’s position
-    parent.insertBefore(container, first);
-
-    // Move all members into the container, tagging user vs model
-    members.forEach((el, idx) => {
-      el.setAttribute(PROCESSED, 'true');
-      if (idx === 0 && isUserEl(el)) {
-        el.classList.add(USER_PART);
-      } else {
-        el.classList.add(MODEL_PART);
-      }
-      container.appendChild(el);
-    });
-
-    // Action bar → inside the user-part element so it survives collapse
-    const userPart = container.querySelector('.' + USER_PART);
-    if (userPart) {
-      if (getComputedStyle(userPart).position === 'static') userPart.style.position = 'relative';
-      userPart.appendChild(createActionBar(container));
-    } else {
-      container.appendChild(createActionBar(container));
+    // Tag user element
+    userEl.classList.add(UNIT_CLS, KEEP_CLS);
+    userEl.setAttribute(PROCESSED, 'true');
+    userEl.setAttribute(GROUP_ATTR, String(id));
+    if (getComputedStyle(userEl).position === 'static') {
+      userEl.style.position = 'relative';
     }
 
-    console.log(`[Aether] ✅ Wrapped group ${id} with ${members.length} part(s)`);
+    // Tag all model elements
+    for (let i = 1; i < members.length; i++) {
+      members[i].classList.add(HIDEABLE);
+      members[i].setAttribute(PROCESSED, 'true');
+      members[i].setAttribute(GROUP_ATTR, String(id));
+    }
+
+    // Inject action bar into user element (top-right)
+    userEl.appendChild(createActionBar(userEl, id));
+
+    console.log(`[Aether] ✅ Tagged group ${id}: 1 user + ${members.length - 1} model part(s)`);
   }
 
   // ── Capture streaming orphans ─────────────────────────────────────────────
-  // After wrapping, new model/output elements may stream in as siblings
-  // of the container. Pull them inside.
+  // After tagging, new model/output elements may stream in as siblings
+  // after the last known model element of a group. Tag them too.
   function captureOrphans() {
-    const containers = document.querySelectorAll('.' + CONTAINER);
-    containers.forEach(c => {
-      const actionBar = c.querySelector('.aether-action-bar');
-      let next = c.nextElementSibling;
+    const unitEls = document.querySelectorAll('.' + UNIT_CLS);
+
+    unitEls.forEach(userEl => {
+      const groupId = userEl.getAttribute(GROUP_ATTR);
+      let next = userEl.nextElementSibling;
 
       while (next) {
-        // Stop at another container or a new user turn
-        if (next.classList.contains(CONTAINER)) break;
+        // Stop at another user turn-unit
+        if (next.classList.contains(UNIT_CLS)) break;
+        // Skip already-processed
         if (next.hasAttribute(PROCESSED)) { next = next.nextElementSibling; continue; }
 
-        // Check if this is a turn-level element
+        // Check if it's a turn-level element
         const isTurn = TURN_SELECTORS.some(sel => {
           try { return next.matches(sel); } catch { return false; }
         });
 
-        if (isTurn && isUserEl(next)) break; // next user → stop
+        if (isTurn && isUserEl(next)) break; // new user → stop
 
         if (isTurn) {
-          // Orphan model/thoughts/output → capture
-          const grab = next;
-          next = next.nextElementSibling;
-          grab.setAttribute(PROCESSED, 'true');
-          grab.classList.add(MODEL_PART);
-          c.insertBefore(grab, actionBar);
-          console.log('[Aether] 📥 Captured orphan into group', c.getAttribute('data-aether-group'));
-        } else {
-          next = next.nextElementSibling;
+          next.classList.add(HIDEABLE);
+          next.setAttribute(PROCESSED, 'true');
+          next.setAttribute(GROUP_ATTR, groupId);
+          // If group is currently collapsed, hide this new arrival too
+          if (userEl.classList.contains(COLLAPSED)) {
+            next.classList.add(HIDDEN_CLS);
+          }
+          console.log('[Aether] 📥 Tagged orphan for group', groupId);
         }
+        next = next.nextElementSibling;
       }
     });
   }
@@ -212,14 +210,20 @@
       );
     }
 
-    console.log('Groups wrapped:', groupCount);
+    console.log('Groups tagged:', groupCount);
+    const units = document.querySelectorAll('.' + UNIT_CLS);
+    units.forEach(u => {
+      const gid = u.getAttribute(GROUP_ATTR);
+      const parts = document.querySelectorAll(`.${HIDEABLE}[${GROUP_ATTR}="${gid}"]`);
+      console.log(`  Group ${gid}: user ✅, model parts: ${parts.length}`);
+    });
     console.groupEnd();
   }
 
   // ── Main ───────────────────────────────────────────────────────────────────
   function run() {
     const groups = buildGroups();
-    if (groups.length) groups.forEach(wrapGroup);
+    if (groups.length) groups.forEach(tagGroup);
     captureOrphans();
   }
 
