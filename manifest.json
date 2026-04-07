@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Better Google AI Studio",
+  "version": "1.0.0",
+  "description": "Enhances Google AI Studio with conversation branching capabilities.",
+  "host_permissions": [
+    "https://aistudio.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://aistudio.google.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

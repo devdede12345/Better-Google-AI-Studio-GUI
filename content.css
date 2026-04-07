@@ -1,0 +1,252 @@
+/* ───────────────────────────────────────────────────────────
+   Aether — Google AI Studio Enhancer
+   Master-container structural wrapping
+   ─────────────────────────────────────────────────────────── */
+
+
+/* ── Master container ───────────────────────────────────────────────── */
+
+.aether-master-container {
+  position: relative;
+  border-radius: 8px;
+  transition:
+    max-height 300ms cubic-bezier(0.4, 0, 0.2, 1),
+    background 200ms ease,
+    border-color 200ms ease;
+}
+
+
+/* ── Left thread line (full height) ─────────────────────────────────── */
+
+.aether-master-container::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  z-index: 5;
+  transition:
+    background 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.aether-master-container:hover::before {
+  background: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.10);
+}
+
+
+/* ── Round separator after container ───────────────────────────────── */
+
+.aether-master-container::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(255, 255, 255, 0.06) 20%,
+    rgba(255, 255, 255, 0.06) 80%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+
+/* ── Action bar (fold + branch) ─────────────────────────────────────── */
+
+.aether-action-bar {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.15;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+
+.aether-master-container:hover .aether-action-bar {
+  opacity: 1;
+}
+
+
+/* ── Shared button base ──────────────────────────────────────────────── */
+
+.aether-fold-btn,
+.aether-branch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  outline: none;
+  white-space: nowrap;
+  font-family: 'Google Sans', 'Roboto', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  transition: all 180ms ease;
+}
+
+
+/* ── Fold button ─────────────────────────────────────────────────────── */
+
+.aether-fold-btn {
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.40);
+}
+
+.aether-fold-btn:hover {
+  background: rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.aether-fold-icon {
+  font-size: 10px;
+}
+
+
+/* ── Branch button ───────────────────────────────────────────────────── */
+
+.aether-branch-btn {
+  padding: 4px 12px 4px 8px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(8px) saturate(1.3);
+  -webkit-backdrop-filter: blur(8px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.aether-branch-btn:hover {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+.aether-branch-btn--active {
+  transform: scale(0.96);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.aether-branch-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.35);
+  outline-offset: 2px;
+}
+
+.aether-branch-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.aether-branch-label {
+  display: inline-block;
+}
+
+
+/* ── Collapsed state (.is-collapsed) ───────────────────────────────── */
+
+/* Container: no height limit, user content drives height */
+.aether-master-container.is-collapsed {
+  max-height: none !important;
+  overflow: visible !important;
+  border-left: 4px solid #4285f4 !important;
+  padding-bottom: 10px;
+}
+
+/* User part: ALWAYS fully visible */
+.aether-master-container.is-collapsed .aether-user-part {
+  display: block !important;
+  opacity: 1 !important;
+  height: auto !important;
+}
+
+/* Model parts: completely hidden */
+.aether-master-container.is-collapsed .aether-model-part {
+  display: none !important;
+}
+
+/* Thread line becomes a strong accent */
+.aether-master-container.is-collapsed::before {
+  background: #4285f4;
+  width: 0; /* hidden — the border-left takes over */
+}
+
+/* Hide separator */
+.aether-master-container.is-collapsed::after {
+  display: none;
+}
+
+/* Keep action bar visible (it lives inside .aether-user-part) */
+.aether-master-container.is-collapsed .aether-action-bar {
+  opacity: 1;
+}
+
+
+/* ── Light mode ───────────────────────────────────────────────────────── */
+
+@media (prefers-color-scheme: light) {
+  .aether-master-container::before {
+    background: rgba(0, 0, 0, 0.06);
+  }
+  .aether-master-container:hover::before {
+    background: rgba(0, 0, 0, 0.16);
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.06);
+  }
+
+  .aether-master-container::after {
+    background: linear-gradient(
+      to right,
+      transparent,
+      rgba(0, 0, 0, 0.05) 20%,
+      rgba(0, 0, 0, 0.05) 80%,
+      transparent
+    );
+  }
+
+  .aether-fold-btn {
+    background: rgba(0, 0, 0, 0.04);
+    color: rgba(0, 0, 0, 0.35);
+  }
+  .aether-fold-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: rgba(0, 0, 0, 0.65);
+  }
+
+  .aether-branch-btn {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.06);
+    color: rgba(0, 0, 0, 0.40);
+  }
+  .aether-branch-btn:hover {
+    background: rgba(0, 0, 0, 0.07);
+    border-color: rgba(0, 0, 0, 0.14);
+    color: rgba(0, 0, 0, 0.78);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.10);
+  }
+
+  .aether-master-container.is-collapsed {
+    border-left-color: #1a73e8 !important;
+  }
+  .aether-master-container.is-collapsed::before {
+    width: 0;
+  }
+}
