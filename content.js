@@ -214,7 +214,7 @@
     b.setAttribute('aria-label','Collapse turn');
     b.innerHTML = '<span class="aether-fold-icon">\u25BE</span>';
     b.addEventListener('click', e => {
-      e.stopPropagation(); e.preventDefault();
+      e.preventDefault();
       const on = userEl.classList.toggle(COLLAPSED);
       document.querySelectorAll('.' + HIDEABLE + '[' + GROUP_ATTR + '="' + gid + '"]')
         .forEach(m => m.classList.toggle(HIDDEN_CLS, on));
@@ -232,7 +232,7 @@
     b.innerHTML = '<span class="aether-branch-icon">\uD83C\uDF31</span>' +
                   '<span class="aether-branch-label">Branch</span>';
     b.addEventListener('click', e => {
-      e.stopPropagation(); e.preventDefault();
+      e.preventDefault();
       b.classList.add('aether-branch-btn--active');
       setTimeout(() => b.classList.remove('aether-branch-btn--active'), 400);
       showBranchDialog(nodeId);
@@ -463,32 +463,44 @@
     ctxMenu.style.display = 'none';
     ctxMenu.innerHTML =
       '<div class="aether-ctx-item" data-action="branch">\uD83C\uDF31 New Branch from here</div>' +
+      '<div class="aether-ctx-item" data-action="rename">\uD83D\uDCDD Rename Node</div>' +
       '<div class="aether-ctx-item" data-action="switch-main">\u2B95 Switch to main</div>';
     document.body.appendChild(ctxMenu);
-    // Close on click-away
-    document.addEventListener('click', function() { ctxMenu.style.display = 'none'; });
+    // Close on click-away — use capture:false so it doesn't interfere with native inputs
+    document.addEventListener('click', function(e) {
+      if (ctxMenu && !ctxMenu.contains(e.target)) ctxMenu.style.display = 'none';
+    });
   }
 
   function showCtxMenu(x, y, nodeId) {
     if (!ctxMenu) createCtxMenu();
+    // Auto-highlight the right-clicked node
+    setActiveNode(nodeId);
     ctxMenu.style.left = x + 'px';
     ctxMenu.style.top = y + 'px';
     ctxMenu.style.display = '';
-    // Rebind actions for this node
-    var items = ctxMenu.querySelectorAll('.aether-ctx-item');
-    items.forEach(function(item) {
+    // Rebind actions for this node — clone to clear old listeners
+    var staticItems = ctxMenu.querySelectorAll('.aether-ctx-item:not(.aether-ctx-item--dynamic)');
+    staticItems.forEach(function(item) {
       var clone = item.cloneNode(true);
       item.parentNode.replaceChild(clone, item);
     });
     var branchItem = ctxMenu.querySelector('[data-action="branch"]');
+    var renameItem = ctxMenu.querySelector('[data-action="rename"]');
     var switchItem = ctxMenu.querySelector('[data-action="switch-main"]');
     branchItem.addEventListener('click', function(e) {
-      e.stopPropagation();
+      e.preventDefault();
       ctxMenu.style.display = 'none';
       showBranchDialog(nodeId);
     });
+    renameItem.addEventListener('click', function(e) {
+      e.preventDefault();
+      ctxMenu.style.display = 'none';
+      // Find the label element and trigger inline edit
+      triggerRenameForNode(nodeId);
+    });
     switchItem.addEventListener('click', function(e) {
-      e.stopPropagation();
+      e.preventDefault();
       ctxMenu.style.display = 'none';
       switchBranch(0);
     });
@@ -502,12 +514,21 @@
       d.textContent = '\u2B95 Switch to ' + br.name;
       if (br.id === activeBranchId) { d.style.fontWeight = '600'; d.style.color = br.color; }
       d.addEventListener('click', function(e) {
-        e.stopPropagation();
+        e.preventDefault();
         ctxMenu.style.display = 'none';
         switchBranch(br.id);
       });
       ctxMenu.appendChild(d);
     });
+  }
+
+  function triggerRenameForNode(nodeId) {
+    // Find label element in current render
+    var labels = labelBox.querySelectorAll('.aether-graph-label');
+    var idx = nodes.findIndex(function(n) { return n.id === nodeId; });
+    if (idx >= 0 && labels[idx]) {
+      startInlineEdit(labels[idx], nodeId);
+    }
   }
 
   // == Status Bar ==
@@ -714,15 +735,20 @@
     if (labelEl.querySelector('input')) return; // already editing
     var node = nodes.find(function(n) { return n.id === nodeId; });
     if (!node) return;
+    // Highlight the node being edited
+    setActiveNode(nodeId);
     var origText = node.label;
     var input = document.createElement('input');
     input.type = 'text';
     input.className = 'aether-label-input';
     input.value = origText;
+    // Prevent clicks inside the input from triggering external handlers
+    input.addEventListener('click', function(e) { e.stopPropagation(); });
     labelEl.textContent = '';
     labelEl.appendChild(input);
     input.focus();
-    input.select();
+    // Place cursor at end of text
+    input.setSelectionRange(origText.length, origText.length);
 
     var committed = false;
     function commit() {

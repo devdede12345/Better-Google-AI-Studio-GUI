@@ -41,15 +41,18 @@
 
 .aether-action-bar {
   position: absolute;
-  top: 6px; right: 10px;
-  z-index: 100;
+  top: 4px; right: 4px;
+  z-index: 10;
   display: flex; align-items: center; gap: 4px;
-  opacity: 0.15;
+  opacity: 0;
   transition: opacity 200ms ease;
   pointer-events: none;
 }
 
-.aether-turn-unit:hover .aether-action-bar { opacity: 1; }
+.aether-turn-unit:hover .aether-action-bar {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 
 /* ── Branch bar (bottom of last model element) ────────────────── */
@@ -59,10 +62,14 @@
   justify-content: flex-end;
   padding: 8px 10px 4px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 200ms ease;
 }
 
-.aether-can-hide:hover .aether-branch-bar { opacity: 1; }
+.aether-can-hide:hover .aether-branch-bar {
+  opacity: 1;
+  pointer-events: auto;
+}
 
 
 /* ── Button base ──────────────────────────────────────────────── */
@@ -150,12 +157,10 @@
   display: none !important;
 }
 
+/* Keep user turn visible during collapse — minimal overrides only */
 .aether-keep-visible {
-  display: block !important;
   opacity: 1 !important;
-  height: auto !important;
   max-height: none !important;
-  overflow: visible !important;
 }
 
 .aether-turn-unit.is-collapsed {
@@ -164,7 +169,7 @@
 }
 
 .aether-turn-unit.is-collapsed::before { width: 0; }
-.aether-turn-unit.is-collapsed .aether-action-bar { opacity: 1; }
+.aether-turn-unit.is-collapsed .aether-action-bar { opacity: 1; pointer-events: auto; }
 
 
 /* ═══════════════════════════════════════════════════════════════
