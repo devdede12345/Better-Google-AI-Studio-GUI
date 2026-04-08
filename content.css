@@ -489,6 +489,25 @@
   transition: opacity 200ms ease, stroke-dasharray 200ms ease;
 }
 
+/* Fade-out + shrink for branch deletion */
+.aether-fade-out {
+  animation: aether-shrink-fade 350ms ease forwards;
+  pointer-events: none;
+}
+@keyframes aether-shrink-fade {
+  0%   { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.3); }
+}
+/* For SVG elements that don't support CSS transform well */
+svg .aether-fade-out {
+  animation: aether-svg-fade 350ms ease forwards;
+}
+@keyframes aether-svg-fade {
+  0%   { opacity: 1; stroke-width: 1.5; }
+  50%  { opacity: 0.4; stroke-width: 0.5; }
+  100% { opacity: 0; stroke-width: 0; }
+}
+
 
 /* ═══════════════════════════════════════════════════════════════
    CONTEXT MENU

@@ -543,19 +543,30 @@
     return !nodes.some(function(n) { return n.branchId === branchId; });
   }
 
-  function deleteBranch(branchId) {
+  function deleteBranch(branchId, animate) {
     if (branchId === 0) return;
     var br = getBranch(branchId);
     if (!br || br.id === 0) return;
-    // Switch away if currently on this branch
     if (activeBranchId === branchId) switchBranch(0);
-    // Remove branch (set to null to preserve indices for other branch ids)
-    branches[branchId] = null;
-    // Also remove any branches whose fromNode belongs to a node on the deleted branch
-    // (rare, but keeps tree consistent)
-    console.log('[Aether] Deleted branch "' + br.name + '" (id=' + branchId + ')');
-    renderGraph();
-    autoSave();
+
+    if (animate) {
+      // Collect SVG elements tagged for this branch and fade them out
+      var targets = svgEl ? svgEl.querySelectorAll('[data-branch-gfx="' + branchId + '"]') : [];
+      var lblTargets = labelBox ? labelBox.querySelectorAll('[data-branch-gfx="' + branchId + '"]') : [];
+      var all = Array.from(targets).concat(Array.from(lblTargets));
+      all.forEach(function(el) { el.classList.add('aether-fade-out'); });
+      setTimeout(function() {
+        branches[branchId] = null;
+        console.log('[Aether] Deleted branch "' + br.name + '" (id=' + branchId + ')');
+        renderGraph();
+        autoSave();
+      }, 350);
+    } else {
+      branches[branchId] = null;
+      console.log('[Aether] Deleted branch "' + br.name + '" (id=' + branchId + ')');
+      renderGraph();
+      autoSave();
+    }
   }
 
   // == Focus Mode ==
@@ -1105,6 +1116,55 @@
     });
   }
 
+  // Branch-specific context menu (for placeholder circles/labels)
+  function showBranchCtxMenu(x, y, branchId) {
+    if (!ctxMenu) createCtxMenu();
+    ctxMenu.style.left = x + 'px';
+    ctxMenu.style.top = y + 'px';
+    ctxMenu.style.display = '';
+    // Hide static node items, show only branch actions
+    var staticItems = ctxMenu.querySelectorAll('.aether-ctx-item:not(.aether-ctx-item--dynamic)');
+    staticItems.forEach(function(item) { item.style.display = 'none'; });
+    var existingExtras = ctxMenu.querySelectorAll('.aether-ctx-item--dynamic');
+    existingExtras.forEach(function(el) { el.remove(); });
+    var br = getBranch(branchId);
+    if (!br) { ctxMenu.style.display = 'none'; return; }
+    var empty = isBranchEmpty(branchId);
+    // Switch-to option
+    var sw = document.createElement('div');
+    sw.className = 'aether-ctx-item aether-ctx-item--dynamic';
+    sw.textContent = '\u2B95 Switch to ' + br.name;
+    sw.addEventListener('click', function(e) {
+      e.preventDefault(); ctxMenu.style.display = 'none'; switchBranch(branchId);
+    });
+    ctxMenu.appendChild(sw);
+    if (empty) {
+      var del = document.createElement('div');
+      del.className = 'aether-ctx-item aether-ctx-item--dynamic aether-ctx-item--danger';
+      del.textContent = '\uD83D\uDDD1\uFE0F Delete \u201C' + br.name + '\u201D';
+      del.addEventListener('click', function(e) {
+        e.preventDefault(); ctxMenu.style.display = 'none';
+        deleteBranch(branchId, true);
+      });
+      ctxMenu.appendChild(del);
+    } else {
+      // Non-empty: require confirmation
+      var warn = document.createElement('div');
+      warn.className = 'aether-ctx-item aether-ctx-item--dynamic aether-ctx-item--danger';
+      warn.textContent = '\u26A0\uFE0F Delete \u201C' + br.name + '\u201D (has nodes!)';
+      warn.addEventListener('click', function(e) {
+        e.preventDefault();
+        if (confirm('Branch \u201C' + br.name + '\u201D has conversation nodes. Delete anyway?')) {
+          ctxMenu.style.display = 'none';
+          // Move branch nodes back to main before deleting
+          nodes.forEach(function(n) { if (n.branchId === branchId) n.branchId = 0; });
+          deleteBranch(branchId, true);
+        }
+      });
+      ctxMenu.appendChild(warn);
+    }
+  }
+
   function showCtxMenu(x, y, nodeId) {
     if (!ctxMenu) createCtxMenu();
     // Auto-highlight the right-clicked node
@@ -1112,9 +1172,10 @@
     ctxMenu.style.left = x + 'px';
     ctxMenu.style.top = y + 'px';
     ctxMenu.style.display = '';
-    // Rebind actions for this node — clone to clear old listeners
+    // Restore static items (may be hidden by showBranchCtxMenu) and rebind
     var staticItems = ctxMenu.querySelectorAll('.aether-ctx-item:not(.aether-ctx-item--dynamic)');
     staticItems.forEach(function(item) {
+      item.style.display = '';
       var clone = item.cloneNode(true);
       item.parentNode.replaceChild(clone, item);
     });
@@ -1280,7 +1341,9 @@
         var prev = nodes.find(function(n) { return n.id === lastOnBranch[node.branchId]; });
         if (prev) {
           var pp = nXY(prev);
-          svgEl.appendChild(mkLine(pp.x, pp.y, pos.x, pos.y, br.color, '1.5'));
+          var ln = mkLine(pp.x, pp.y, pos.x, pos.y, br.color, '1.5');
+          if (node.branchId !== 0) ln.setAttribute('data-branch-gfx', String(node.branchId));
+          svgEl.appendChild(ln);
         }
       } else if (br.fromNode !== null) {
         // First node on a sub-branch: Bézier from fork point
@@ -1296,6 +1359,7 @@
           pth.setAttribute('stroke-width', '1.5');
           pth.setAttribute('fill', 'none');
           pth.setAttribute('stroke-linecap', 'round');
+          pth.setAttribute('data-branch-gfx', String(node.branchId));
           svgEl.appendChild(pth);
         }
       }
@@ -1321,12 +1385,32 @@
       pth.setAttribute('stroke-width', '1.5');
       pth.setAttribute('fill', 'none');
       pth.setAttribute('stroke-linecap', 'round');
+      pth.setAttribute('data-branch-gfx', String(br.id));
       svgEl.appendChild(pth);
-      svgEl.appendChild(mkCircle(bx, by, G.r - 1, 'none', br.color, '1.5', null));
+      var phCircle = mkCircle(bx, by, G.r - 1, 'none', br.color, '1.5', null);
+      phCircle.setAttribute('data-branch-gfx', String(br.id));
+      phCircle.style.cursor = 'pointer';
+      phCircle.addEventListener('contextmenu', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        showBranchCtxMenu(e.pageX, e.pageY, br.id);
+      });
+      phCircle.addEventListener('click', function() {
+        if (br.id !== activeBranchId) switchBranch(br.id);
+      });
+      svgEl.appendChild(phCircle);
       var lb = mkLbl(br.name, labX, by - 7, false);
       lb.style.color = br.color;
       lb.style.fontStyle = 'italic';
       lb.style.fontSize = '10px';
+      lb.setAttribute('data-branch-gfx', String(br.id));
+      lb.style.cursor = 'pointer';
+      lb.addEventListener('contextmenu', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        showBranchCtxMenu(e.pageX, e.pageY, br.id);
+      });
+      lb.addEventListener('click', function() {
+        if (br.id !== activeBranchId) switchBranch(br.id);
+      });
       labelBox.appendChild(lb);
     });
 
@@ -1343,6 +1427,7 @@
       var c = mkCircle(pos.x, pos.y, act ? G.r + 1 : G.r, fill, br.color, sw, null);
       c.classList.add('aether-graph-node');
       c.dataset.nodeId = String(node.id);
+      if (node.branchId !== 0) c.setAttribute('data-branch-gfx', String(node.branchId));
       c.style.cursor = 'grab';
       c.addEventListener('click', function() {
         scrollToNode(node.id);
@@ -1359,6 +1444,7 @@
       svgEl.appendChild(c);
 
       var lb = mkLbl(node.label, labX, pos.y - 7, act, node.id);
+      if (node.branchId !== 0) lb.setAttribute('data-branch-gfx', String(node.branchId));
       lb.addEventListener('click', function() {
         scrollToNode(node.id);
         if (node.branchId !== activeBranchId) switchBranch(node.branchId);
