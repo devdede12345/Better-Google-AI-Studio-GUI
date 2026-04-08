@@ -65,7 +65,7 @@
     var key = stateKey();
     var state = {
       nodes: serializeNodes(),
-      branches: branches.map(function(b) {
+      branches: branches.filter(function(b) { return b !== null; }).map(function(b) {
         return { id: b.id, name: b.name, color: b.color, fromNode: b.fromNode };
       }),
       activeBranchId: activeBranchId,
@@ -511,6 +511,26 @@
     console.log('[Aether] Switched to branch: ' + (branches[bid] ? branches[bid].name : bid));
   }
 
+  function isBranchEmpty(branchId) {
+    if (branchId === 0) return false; // never delete main
+    return !nodes.some(function(n) { return n.branchId === branchId; });
+  }
+
+  function deleteBranch(branchId) {
+    if (branchId === 0) return;
+    var br = branches[branchId];
+    if (!br) return;
+    // Switch away if currently on this branch
+    if (activeBranchId === branchId) switchBranch(0);
+    // Remove branch (set to null to preserve indices for other branch ids)
+    branches[branchId] = null;
+    // Also remove any branches whose fromNode belongs to a node on the deleted branch
+    // (rare, but keeps tree consistent)
+    console.log('[Aether] Deleted branch "' + br.name + '" (id=' + branchId + ')');
+    renderGraph();
+    autoSave();
+  }
+
   // == Focus Mode ==
   function getAncestorChain(branchId) {
     // Build set of visible node IDs: all nodes on active branch,
@@ -592,6 +612,16 @@
   // == Drag & Drop ==
   var customDrag = null;
   var dropZoneContainer = null;
+  var ghostLayer = null;       // SVG <g> for prediction lines
+  var predictionPath = null;   // SVG <path> for the animated ghost line
+  var subtreeGhostG = null;    // SVG <g> for cloned subtree ghost
+  var subtreeGhostLabels = null; // HTML container for ghost labels
+  var detachedLines = [];      // Original lines dimmed during drag
+  var rafId = null;            // requestAnimationFrame handle
+  var dragSourceNodeId = null; // Currently dragged node id (shared by both mechanisms)
+  var lastDragSvgPt = null;    // Last mouse position in SVG coords
+  var snapBranchId = -1;       // Current snap target
+  var SNAP_DIST = 28;          // px threshold for snap-to
 
   function setupDropZones() {
     if (!dropZoneContainer) {
@@ -602,14 +632,17 @@
     }
   }
 
-  function showDropZones(excludeBranchId) {
+  function showDropZones(excludeBranchId, srcNodeId) {
     if (!dropZoneContainer) return;
     dropZoneContainer.innerHTML = '';
     dropZoneContainer.classList.add('aether-dropzone--active');
+    dragSourceNodeId = srcNodeId != null ? srcNodeId : null;
+    initGhostLayer();
+    applyDetachFeedback(srcNodeId);
     var totalH = G.pT + Math.max(1, nodes.length) * G.gap + 40;
     var zoneW = Math.max(G.colW * 2, 32);
     branches.forEach(function(br) {
-      if (br.id === excludeBranchId) return;
+      if (!br || br.id === excludeBranchId) return;
       var zone = document.createElement('div');
       zone.className = 'aether-dropzone';
       zone.style.left = (G.pL + br.id * G.colW - zoneW / 2) + 'px';
@@ -627,9 +660,11 @@
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         zone.classList.add('aether-dropzone--hover');
+        schedulePredict(e.clientX, e.clientY, parseInt(zone.dataset.branchId));
       });
       zone.addEventListener('dragleave', function() {
         zone.classList.remove('aether-dropzone--hover');
+        if (predictionPath) predictionPath.setAttribute('d', '');
       });
       zone.addEventListener('drop', function(e) {
         e.preventDefault();
@@ -645,6 +680,25 @@
     if (!dropZoneContainer) return;
     dropZoneContainer.classList.remove('aether-dropzone--active');
     dropZoneContainer.innerHTML = '';
+    clearPrediction();
+  }
+
+  function getSubtreeNodes(nodeId) {
+    var node = nodes.find(function(n) { return n.id === nodeId; });
+    if (!node) return [];
+    var srcBid = node.branchId;
+    var startIdx = nodes.indexOf(node);
+    var sub = [];
+    for (var i = startIdx; i < nodes.length; i++) {
+      if (nodes[i].branchId === srcBid) sub.push(nodes[i]);
+    }
+    return sub;
+  }
+
+  function isDescendantOf(candidateId, ancestorId) {
+    // Prevent dropping a node onto one of its own subtree children
+    var sub = getSubtreeNodes(ancestorId);
+    return sub.some(function(n) { return n.id === candidateId; });
   }
 
   function handleNodeDrop(nodeId, targetBranchId) {
@@ -669,6 +723,238 @@
     autoSave();
   }
 
+  // == Prediction Line Helpers ==
+  function initGhostLayer() {
+    if (!svgEl) return;
+    if (ghostLayer) ghostLayer.remove();
+    if (subtreeGhostG) subtreeGhostG.remove();
+    if (subtreeGhostLabels) subtreeGhostLabels.remove();
+
+    ghostLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    ghostLayer.setAttribute('class', 'aether-ghost-layer');
+    predictionPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    predictionPath.setAttribute('class', 'aether-prediction-path');
+    predictionPath.setAttribute('fill', 'none');
+    predictionPath.setAttribute('stroke-width', '1.5');
+    predictionPath.setAttribute('stroke-linecap', 'round');
+    predictionPath.setAttribute('stroke-dasharray', '5,5');
+    predictionPath.setAttribute('stroke', 'rgba(255,255,255,0.35)');
+    ghostLayer.appendChild(predictionPath);
+
+    // Build subtree ghost clone
+    subtreeGhostG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    subtreeGhostG.setAttribute('class', 'aether-subtree-ghost');
+    ghostLayer.appendChild(subtreeGhostG);
+
+    subtreeGhostLabels = document.createElement('div');
+    subtreeGhostLabels.className = 'aether-subtree-ghost-labels';
+
+    if (dragSourceNodeId != null) {
+      var sub = getSubtreeNodes(dragSourceNodeId);
+      if (sub.length > 0) {
+        // Clone circles
+        var srcBr = branches[sub[0].branchId] || branches[0];
+        for (var i = 0; i < sub.length; i++) {
+          var pos = nXY(sub[i]);
+          var gc = mkCircle(pos.x, pos.y, G.r, 'none', srcBr.color, '1.5', null);
+          gc.setAttribute('data-ghost-idx', String(i));
+          subtreeGhostG.appendChild(gc);
+          // Vertical line between consecutive ghost nodes
+          if (i > 0) {
+            var prev = nXY(sub[i - 1]);
+            var gl = mkLine(prev.x, prev.y, pos.x, pos.y, srcBr.color, '1');
+            gl.setAttribute('data-ghost-line', '1');
+            subtreeGhostG.appendChild(gl);
+          }
+          // Ghost label
+          var gLbl = document.createElement('div');
+          gLbl.className = 'aether-ghost-label';
+          gLbl.textContent = sub[i].label;
+          gLbl.style.top = (pos.y - 7) + 'px';
+          var maxCol = 0;
+          for (var b = 0; b < branches.length; b++) if (branches[b] && branches[b].id > maxCol) maxCol = branches[b].id;
+          gLbl.style.left = (G.pL + (maxCol + 1) * G.colW + 14) + 'px';
+          subtreeGhostLabels.appendChild(gLbl);
+        }
+      }
+    }
+
+    svgEl.appendChild(ghostLayer);
+    labelBox.appendChild(subtreeGhostLabels);
+    snapBranchId = -1;
+  }
+
+  function clearPrediction() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    if (ghostLayer) { ghostLayer.remove(); ghostLayer = null; predictionPath = null; subtreeGhostG = null; }
+    if (subtreeGhostLabels) { subtreeGhostLabels.remove(); subtreeGhostLabels = null; }
+    detachedLines.forEach(function(el) {
+      el.removeAttribute('opacity');
+      el.style.strokeDasharray = '';
+    });
+    detachedLines = [];
+    dragSourceNodeId = null;
+    lastDragSvgPt = null;
+    snapBranchId = -1;
+  }
+
+  function applyDetachFeedback(srcNodeId) {
+    if (srcNodeId == null || !svgEl) return;
+    // Find all vertical lines and connectors, dim those attached to the source node
+    var srcNode = nodes.find(function(n) { return n.id === srcNodeId; });
+    if (!srcNode) return;
+    var srcPos = nXY(srcNode);
+    // Dim any SVG line/path that touches the source node position
+    var elems = svgEl.querySelectorAll('line, path');
+    elems.forEach(function(el) {
+      if (el === predictionPath || (ghostLayer && ghostLayer.contains(el))) return;
+      var touches = false;
+      if (el.tagName === 'line') {
+        var ly1 = parseFloat(el.getAttribute('y1'));
+        var ly2 = parseFloat(el.getAttribute('y2'));
+        var lx = parseFloat(el.getAttribute('x1'));
+        if (Math.abs(lx - srcPos.x) < 2 && srcPos.y >= ly1 - 1 && srcPos.y <= ly2 + 1) touches = true;
+      }
+      if (touches) {
+        el.setAttribute('opacity', '0.25');
+        el.style.strokeDasharray = '4,4';
+        detachedLines.push(el);
+      }
+    });
+  }
+
+  function findNearestNodeOnBranch(branchId, mouseY) {
+    var best = null, bestDist = Infinity;
+    nodes.forEach(function(n) {
+      if (n.branchId !== branchId) return;
+      var pos = nXY(n);
+      var d = Math.abs(pos.y - mouseY);
+      if (d < bestDist) { bestDist = d; best = n; }
+    });
+    return best;
+  }
+
+  function updatePredictionLine(clientX, clientY, hoverBranchId) {
+    if (!predictionPath || !svgEl) return;
+    var svgRect = svgEl.getBoundingClientRect();
+    var mx = clientX - svgRect.left;
+    var my = clientY - svgRect.top;
+    lastDragSvgPt = { x: mx, y: my };
+
+    // Guard: can't drop on own subtree
+    if (hoverBranchId >= 0 && dragSourceNodeId != null) {
+      var nearTgt = findNearestNodeOnBranch(hoverBranchId, my);
+      if (nearTgt && isDescendantOf(nearTgt.id, dragSourceNodeId)) {
+        hoverBranchId = -1; // invalid target
+      }
+    }
+
+    if (hoverBranchId == null || hoverBranchId < 0) {
+      predictionPath.setAttribute('d', '');
+      resetSubtreeGhostPosition();
+      snapBranchId = -1;
+      return;
+    }
+
+    var targetBr = branches[hoverBranchId];
+    if (!targetBr) { predictionPath.setAttribute('d', ''); resetSubtreeGhostPosition(); snapBranchId = -1; return; }
+
+    // Find nearest node on target branch as anchor
+    var anchor = findNearestNodeOnBranch(hoverBranchId, my);
+    var ax, ay;
+    if (anchor) {
+      var ap = nXY(anchor);
+      ax = ap.x; ay = ap.y;
+    } else {
+      ax = G.pL + hoverBranchId * G.colW;
+      ay = my - 30;
+    }
+
+    // Build Bézier from anchor to snap target (not raw mouse)
+    var targetX = G.pL + hoverBranchId * G.colW;
+    var targetY = ay + G.gap;
+    var cpOff = Math.abs(targetY - ay) * 0.45;
+    var d = 'M' + ax + ',' + ay +
+            ' C' + ax + ',' + (ay + cpOff) +
+            ' ' + targetX + ',' + (targetY - cpOff) +
+            ' ' + targetX + ',' + targetY;
+    predictionPath.setAttribute('d', d);
+    predictionPath.setAttribute('stroke', targetBr.color);
+    predictionPath.style.opacity = '0.6';
+
+    // Snap subtree ghost to target position
+    snapSubtreeGhost(hoverBranchId, targetX, targetY, targetBr.color);
+    snapBranchId = hoverBranchId;
+  }
+
+  function snapSubtreeGhost(branchId, baseX, baseY, color) {
+    if (!subtreeGhostG || dragSourceNodeId == null) return;
+    var sub = getSubtreeNodes(dragSourceNodeId);
+    if (sub.length === 0) return;
+    // Compute offset: position first ghost node at (baseX, baseY)
+    var origFirst = nXY(sub[0]);
+    var dx = baseX - origFirst.x;
+    var dy = baseY - origFirst.y;
+    subtreeGhostG.setAttribute('transform', 'translate(' + dx + ',' + dy + ')');
+    // Recolor
+    var circles = subtreeGhostG.querySelectorAll('circle');
+    circles.forEach(function(c) { c.setAttribute('stroke', color); });
+    var lines = subtreeGhostG.querySelectorAll('line');
+    lines.forEach(function(l) { l.setAttribute('stroke', color); });
+    subtreeGhostG.style.opacity = '0.5';
+    // Move ghost labels
+    if (subtreeGhostLabels) {
+      var lbls = subtreeGhostLabels.querySelectorAll('.aether-ghost-label');
+      for (var i = 0; i < lbls.length && i < sub.length; i++) {
+        var origP = nXY(sub[i]);
+        lbls[i].style.top = (origP.y + dy - 7) + 'px';
+        lbls[i].style.color = color;
+      }
+      subtreeGhostLabels.style.opacity = '1';
+    }
+  }
+
+  function resetSubtreeGhostPosition() {
+    if (subtreeGhostG) {
+      subtreeGhostG.setAttribute('transform', '');
+      subtreeGhostG.style.opacity = '0';
+    }
+    if (subtreeGhostLabels) subtreeGhostLabels.style.opacity = '0';
+  }
+
+  function schedulePredict(clientX, clientY, hoverBranchId) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(function() {
+      rafId = null;
+      updatePredictionLine(clientX, clientY, hoverBranchId);
+    });
+  }
+
+  function getHoverBranchId(clientX, clientY) {
+    if (!dropZoneContainer) return -1;
+    var zones = dropZoneContainer.querySelectorAll('.aether-dropzone');
+    var bid = -1;
+    zones.forEach(function(z) {
+      var r = z.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right &&
+          clientY >= r.top && clientY <= r.bottom) {
+        bid = parseInt(z.dataset.branchId);
+      }
+    });
+    return bid;
+  }
+
+  // Esc key cancels any drag
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      if (customDrag) {
+        customDrag.ghost.remove();
+        customDrag = null;
+      }
+      hideDropZones();
+    }
+  });
+
   // Custom drag for SVG circles (no native HTML5 DnD on SVG)
   // Uses a 5px movement threshold to distinguish click from drag.
   var DRAG_THRESHOLD = 5;
@@ -687,7 +973,7 @@
         // Threshold met — start real drag
         dragging = true;
         setActiveNode(nodeId);
-        showDropZones(nd.branchId);
+        showDropZones(nd.branchId, nodeId);
         var ghost = document.createElement('div');
         ghost.className = 'aether-drag-ghost';
         ghost.textContent = nd.label;
@@ -696,15 +982,15 @@
       }
       customDrag.ghost.style.left = (ev.clientX + 12) + 'px';
       customDrag.ghost.style.top = (ev.clientY - 10) + 'px';
+      var hovBid = getHoverBranchId(ev.clientX, ev.clientY);
       if (dropZoneContainer) {
         var zones = dropZoneContainer.querySelectorAll('.aether-dropzone');
         zones.forEach(function(z) {
-          var r = z.getBoundingClientRect();
           z.classList.toggle('aether-dropzone--hover',
-            ev.clientX >= r.left && ev.clientX <= r.right &&
-            ev.clientY >= r.top && ev.clientY <= r.bottom);
+            parseInt(z.dataset.branchId) === hovBid);
         });
       }
+      schedulePredict(ev.clientX, ev.clientY, hovBid);
     }
 
     function onUp(ev) {
@@ -828,7 +1114,7 @@
     var existingExtras = ctxMenu.querySelectorAll('.aether-ctx-item--dynamic');
     existingExtras.forEach(function(el) { el.remove(); });
     branches.forEach(function(br) {
-      if (br.id === 0) return;
+      if (!br || br.id === 0) return;
       var d = document.createElement('div');
       d.className = 'aether-ctx-item aether-ctx-item--dynamic';
       d.textContent = '\u2B95 Switch to ' + br.name;
@@ -839,6 +1125,18 @@
         switchBranch(br.id);
       });
       ctxMenu.appendChild(d);
+      // Offer delete if branch is empty
+      if (isBranchEmpty(br.id)) {
+        var del = document.createElement('div');
+        del.className = 'aether-ctx-item aether-ctx-item--dynamic aether-ctx-item--danger';
+        del.textContent = '\uD83D\uDDD1\uFE0F Delete \u201C' + br.name + '\u201D (empty)';
+        del.addEventListener('click', function(e) {
+          e.preventDefault();
+          ctxMenu.style.display = 'none';
+          deleteBranch(br.id);
+        });
+        ctxMenu.appendChild(del);
+      }
     });
   }
 
@@ -932,7 +1230,7 @@
     if (cnt) cnt.textContent = nodes.length + ' turn' + (nodes.length !== 1 ? 's' : '');
 
     var maxCol = 0;
-    for (var b = 0; b < branches.length; b++) if (branches[b].id > maxCol) maxCol = branches[b].id;
+    for (var b = 0; b < branches.length; b++) if (branches[b] && branches[b].id > maxCol) maxCol = branches[b].id;
     var totalH = G.pT + Math.max(1, nodes.length) * G.gap + 20;
     var labX = G.pL + (maxCol + 1) * G.colW + 14;
     var totalW = labX + 160;
@@ -946,6 +1244,7 @@
 
     // Vertical lines
     branches.forEach(function(br) {
+      if (!br) return;
       var bn = nodes.filter(function(n) { return n.branchId === br.id; });
       if (bn.length < 2) return;
       var f = nXY(bn[0]), l = nXY(bn[bn.length - 1]);
@@ -954,7 +1253,7 @@
 
     // Branch connectors
     branches.forEach(function(br) {
-      if (br.fromNode === null) return;
+      if (!br || br.fromNode === null) return;
       var par = nodes.find(function(n) { return n.id === br.fromNode; });
       if (!par) return;
       var p = nXY(par);
@@ -1061,7 +1360,7 @@
       d.classList.add('aether-label--dragging');
       setActiveNode(nodeId);
       var nd = nodes.find(function(n) { return n.id === nodeId; });
-      if (nd) showDropZones(nd.branchId);
+      if (nd) showDropZones(nd.branchId, nodeId);
     });
     d.addEventListener('dragend', function() {
       d.classList.remove('aether-label--dragging');
