@@ -37,77 +37,75 @@
   let runTimer = null;
   const RUN_DEBOUNCE = 600;
   let lastUrl = location.href;
-  const STORAGE_KEY = 'aether_custom_labels';
-  const BRANCH_STORAGE_KEY = 'aether_branches';
   let customLabels = {};
+  var saveIndicator;
+  var saveTimer = null;
 
-  // == Storage helpers ==
-  function storageKey() {
-    // Scope labels per playground URL path (ignore query/hash)
-    return STORAGE_KEY + ':' + location.pathname;
+  // == Chat ID & Unified Storage ==
+  function getChatId() {
+    var m = location.pathname.match(/\/prompts?\/([^\/\?#]+)/);
+    if (m) return m[1];
+    return location.pathname.replace(/\//g, '_') || '_root';
   }
 
-  function loadCustomLabels(cb) {
-    var key = storageKey();
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(key, function(result) {
-        customLabels = result[key] || {};
-        console.log('[Aether] Loaded ' + Object.keys(customLabels).length + ' custom label(s)');
-        if (cb) cb();
-      });
-    } else {
-      // Fallback for dev/testing without extension context
-      try { customLabels = JSON.parse(localStorage.getItem(key) || '{}'); } catch(e) { customLabels = {}; }
-      if (cb) cb();
-    }
-  }
+  function stateKey() { return 'aether_state:' + getChatId(); }
 
-  function saveCustomLabels() {
-    var key = storageKey();
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      var data = {};
-      data[key] = customLabels;
-      chrome.storage.local.set(data);
-    } else {
-      try { localStorage.setItem(key, JSON.stringify(customLabels)); } catch(e) {}
-    }
-  }
-
-  // Branch persistence
-  function branchStorageKey() { return BRANCH_STORAGE_KEY + ':' + location.pathname; }
-
-  function saveBranches() {
-    var key = branchStorageKey();
-    var data = branches.map(function(b) {
-      return { id: b.id, name: b.name, color: b.color, fromNode: b.fromNode };
+  function serializeNodes() {
+    return nodes.map(function(n) {
+      var snippet = '';
+      try { snippet = getLabel(n.userEl); } catch(e) {}
+      return {
+        id: n.id, branchId: n.branchId, parentId: n.parentId,
+        label: n.label, custom: n.custom, textSnippet: snippet
+      };
     });
+  }
+
+  function saveState() {
+    var key = stateKey();
+    var state = {
+      nodes: serializeNodes(),
+      branches: branches.map(function(b) {
+        return { id: b.id, name: b.name, color: b.color, fromNode: b.fromNode };
+      }),
+      activeBranchId: activeBranchId,
+      customLabels: customLabels,
+      savedAt: Date.now()
+    };
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      var obj = {}; obj[key] = data;
-      chrome.storage.local.set(obj);
+      var obj = {}; obj[key] = state;
+      chrome.storage.local.set(obj, function() { showSaveIndicator(); });
     } else {
-      try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
+      try { localStorage.setItem(key, JSON.stringify(state)); } catch(e) {}
+      showSaveIndicator();
     }
   }
 
-  function loadBranches(cb) {
-    var key = branchStorageKey();
+  function autoSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(function() { saveTimer = null; saveState(); }, 300);
+  }
+
+  function loadState(cb) {
+    var key = stateKey();
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(key, function(result) {
-        var saved = result[key];
-        if (saved && saved.length) {
-          branches.length = 0;
-          saved.forEach(function(b) { branches.push(b); });
-          console.log('[Aether] Loaded ' + branches.length + ' branch(es)');
-        }
-        if (cb) cb();
-      });
+      chrome.storage.local.get(key, function(result) { cb(result[key] || null); });
     } else {
       try {
-        var saved = JSON.parse(localStorage.getItem(key) || '[]');
-        if (saved.length) { branches.length = 0; saved.forEach(function(b) { branches.push(b); }); }
-      } catch(e) {}
-      if (cb) cb();
+        var raw = localStorage.getItem(key);
+        cb(raw ? JSON.parse(raw) : null);
+      } catch(e) { cb(null); }
     }
+  }
+
+  function showSaveIndicator() {
+    if (!saveIndicator) return;
+    saveIndicator.textContent = '\u2713 saved';
+    saveIndicator.classList.add('aether-save--visible');
+    clearTimeout(saveIndicator._hideTimer);
+    saveIndicator._hideTimer = setTimeout(function() {
+      saveIndicator.classList.remove('aether-save--visible');
+    }, 1500);
   }
 
   function getCustomLabel(nodeId) {
@@ -117,7 +115,7 @@
   function setCustomLabel(nodeId, text) {
     if (text) customLabels[String(nodeId)] = text;
     else delete customLabels[String(nodeId)];
-    saveCustomLabels();
+    autoSave();
   }
 
   // Resolve display label: custom > auto-extracted
@@ -290,6 +288,7 @@
     if (intersectionObs) intersectionObs.observe(userEl);
     applyFocusMode();
     renderGraph();
+    autoSave();
     console.log('[Aether] Group ' + id + ' (branch ' + node.branchId + '): "' + node.label + '"');
   }
 
@@ -317,13 +316,185 @@
     });
   }
 
+  // == Rehydration ==
+  function rehydrate(saved) {
+    if (!saved || !saved.nodes || !saved.nodes.length) return false;
+    console.log('[Aether] Rehydrating ' + saved.nodes.length + ' node(s), ' +
+                (saved.branches ? saved.branches.length : 0) + ' branch(es)');
+
+    // Restore branches
+    if (saved.branches && saved.branches.length) {
+      branches.length = 0;
+      saved.branches.forEach(function(b) { branches.push(b); });
+    }
+    // Restore custom labels
+    if (saved.customLabels) customLabels = saved.customLabels;
+    // Restore active branch
+    if (typeof saved.activeBranchId === 'number' && saved.activeBranchId < branches.length) {
+      activeBranchId = saved.activeBranchId;
+    }
+
+    // Scan DOM for current turn groups
+    var allTurns = findTurns();
+    if (allTurns.length < 2) return false;
+
+    var domGroups = [];
+    var curG = null;
+    for (var i = 0; i < allTurns.length; i++) {
+      var el = allTurns[i];
+      if (isUserEl(el)) {
+        if (curG && curG.length > 1) domGroups.push(curG);
+        curG = [el];
+      } else if (curG) curG.push(el);
+    }
+    if (curG && curG.length > 1) domGroups.push(curG);
+    if (domGroups.length === 0) return false;
+
+    // Match saved nodes to DOM groups
+    var usedDom = new Set();
+    var matched = 0, lost = 0;
+
+    for (var si = 0; si < saved.nodes.length; si++) {
+      var sn = saved.nodes[si];
+      var bestIdx = -1;
+
+      // 1) Positional match
+      if (si < domGroups.length && !usedDom.has(si)) {
+        bestIdx = si;
+      }
+
+      // 2) Text-based fallback if positional text doesn't match
+      if (bestIdx >= 0 && sn.textSnippet && sn.textSnippet !== 'Turn') {
+        var posText = getLabel(domGroups[bestIdx][0]);
+        var needle = sn.textSnippet.slice(0, 12);
+        if (posText.indexOf(needle) < 0) {
+          // Positional mismatch — search by text
+          bestIdx = -1;
+          for (var di = 0; di < domGroups.length; di++) {
+            if (usedDom.has(di)) continue;
+            var txt = getLabel(domGroups[di][0]);
+            if (txt.indexOf(needle) >= 0) { bestIdx = di; break; }
+          }
+        }
+      }
+
+      // 3) Accept positional if no better option
+      if (bestIdx < 0 && si < domGroups.length && !usedDom.has(si)) {
+        bestIdx = si;
+      }
+
+      if (bestIdx >= 0) {
+        usedDom.add(bestIdx);
+        tagGroupFromSaved(domGroups[bestIdx], sn);
+        matched++;
+      } else {
+        console.warn('[Aether] Lost node #' + sn.id + ' "' + sn.label + '"');
+        lost++;
+      }
+    }
+
+    // Tag any new DOM groups not in saved state (new messages added while plugin was off)
+    for (var di = 0; di < domGroups.length; di++) {
+      if (!usedDom.has(di) && !domGroups[di][0].hasAttribute(PROCESSED)) {
+        tagGroup(domGroups[di]);
+      }
+    }
+
+    console.log('[Aether] Rehydrated: ' + matched + ' matched, ' + lost + ' lost, ' + nodes.length + ' total');
+    applyFocusMode();
+    updateStatusBar();
+    renderGraph();
+    return true;
+  }
+
+  function tagGroupFromSaved(members, savedNode) {
+    var id = savedNode.id;
+    if (id > groupCount) groupCount = id;
+
+    var userEl = members[0];
+    userEl.classList.add(UNIT_CLS, KEEP_CLS);
+    userEl.setAttribute(PROCESSED, 'true');
+    userEl.setAttribute(GROUP_ATTR, String(id));
+    if (getComputedStyle(userEl).position === 'static') userEl.style.position = 'relative';
+
+    var modelEls = [];
+    for (var i = 1; i < members.length; i++) {
+      var m = members[i];
+      m.classList.add(HIDEABLE);
+      m.setAttribute(PROCESSED, 'true');
+      m.setAttribute(GROUP_ATTR, String(id));
+      if (getComputedStyle(m).position === 'static') m.style.position = 'relative';
+      modelEls.push(m);
+    }
+
+    // Inject UI
+    var bar = document.createElement('div');
+    bar.className = 'aether-action-bar';
+    bar.appendChild(makeFoldBtn(userEl, id));
+    userEl.appendChild(bar);
+
+    if (modelEls.length > 0) {
+      var last = modelEls[modelEls.length - 1];
+      var bbar = document.createElement('div');
+      bbar.className = 'aether-branch-bar';
+      bbar.appendChild(makeBranchBtn(id));
+      last.appendChild(bbar);
+    }
+
+    // Restore node with saved metadata
+    var node = {
+      id: id,
+      branchId: savedNode.branchId,
+      parentId: savedNode.parentId,
+      userEl: userEl,
+      modelEls: modelEls,
+      label: savedNode.custom ? savedNode.label : getLabel(userEl),
+      custom: !!savedNode.custom
+    };
+    userEl.setAttribute(BRANCH_ATTR, String(node.branchId));
+    modelEls.forEach(function(m) { m.setAttribute(BRANCH_ATTR, String(node.branchId)); });
+    nodes.push(node);
+    if (intersectionObs) intersectionObs.observe(userEl);
+  }
+
+  function initFromStorage() {
+    loadState(function(saved) {
+      if (saved && saved.nodes && saved.nodes.length) {
+        var attempts = 0;
+        var maxAttempts = 8;
+        function tryRehydrate() {
+          attempts++;
+          if (rehydrate(saved)) {
+            console.log('[Aether] Rehydration OK on attempt ' + attempts);
+          } else if (attempts < maxAttempts) {
+            setTimeout(tryRehydrate, 800 * attempts);
+          } else {
+            console.log('[Aether] Rehydration failed, falling back to scan');
+            if (saved.branches && saved.branches.length) {
+              branches.length = 0;
+              saved.branches.forEach(function(b) { branches.push(b); });
+            }
+            if (saved.customLabels) customLabels = saved.customLabels;
+            if (typeof saved.activeBranchId === 'number') activeBranchId = saved.activeBranchId;
+            initialScan();
+            updateStatusBar();
+          }
+        }
+        tryRehydrate();
+      } else {
+        initialScan();
+        updateStatusBar();
+      }
+    });
+  }
+
   // == Branching ==
   function doBranch(fromNodeId, branchName) {
     const bid = branches.length;
     const color = COLORS[bid % COLORS.length];
     const name = branchName || ('Branch_' + bid);
     branches.push({ id: bid, name: name, color: color, fromNode: fromNodeId });
-    saveBranches();
+    autoSave();
     console.info('[Aether] Branch "' + name + '" (id=' + bid + ') from node ' + fromNodeId + ' (' + color + ')');
     document.dispatchEvent(new CustomEvent('aether:branch', {
       detail: { fromNodeId, branchId: bid, color, name }, bubbles: true,
@@ -336,6 +507,7 @@
     applyFocusMode();
     updateStatusBar();
     renderGraph();
+    autoSave();
     console.log('[Aether] Switched to branch: ' + (branches[bid] ? branches[bid].name : bid));
   }
 
@@ -581,10 +753,12 @@
     sidebar.innerHTML =
       '<div class="aether-sidebar-header">' +
         '<span class="aether-sidebar-title">AetherMind Graph</span>' +
+        '<span class="aether-save-indicator"></span>' +
         '<span class="aether-sidebar-count"></span>' +
       '</div>' +
       '<div class="aether-sidebar-scroll"></div>';
     document.body.appendChild(sidebar);
+    saveIndicator = sidebar.querySelector('.aether-save-indicator');
 
     const scroll = sidebar.querySelector('.aether-sidebar-scroll');
     svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -872,8 +1046,8 @@
     visibleSet.clear();
     updateStatusBar();
     renderGraph();
-    // Re-scan with retries for SPA lazy-load
-    initialScan();
+    // Re-load state for new URL
+    initFromStorage();
   }
 
   // == Initial scan with retries ==
@@ -939,12 +1113,7 @@
   console.log('[Aether] Loaded on ' + location.href);
   createStatusBar();
   createCtxMenu();
-  // Load persisted data, then scan
-  loadCustomLabels(function() {
-    loadBranches(function() {
-      initialScan();
-      updateStatusBar();
-    });
-  });
+  // Load persisted state, then rehydrate or scan
+  initFromStorage();
   setTimeout(function() { refreshLabels(); diagnose(); }, 5000);
 })();
