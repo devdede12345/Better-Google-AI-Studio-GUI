@@ -25,6 +25,15 @@
 
   const BRANCH_ATTR = 'data-aether-branch';
 
+  // Robust branch lookup by id (not array index — handles null gaps)
+  function getBranch(id) {
+    if (id != null && id < branches.length && branches[id] && branches[id].id === id) return branches[id];
+    for (var i = 0; i < branches.length; i++) {
+      if (branches[i] && branches[i].id === id) return branches[i];
+    }
+    return branches[0];
+  }
+
   // == State ==
   let groupCount = 0;
   const nodes = [];
@@ -270,10 +279,22 @@
     bbar.appendChild(makeBranchBtn(id));
     last.appendChild(bbar);
 
-    // Graph node — all scanned nodes go to branch 0 (main) by default
+    // Graph node — assign to active branch, compute correct parentId
+    var parentId = null;
+    if (activeBranchId > 0) {
+      // On a sub-branch: chain to last node on same branch, or fork point
+      var lastOnBranch = null;
+      for (var ni = nodes.length - 1; ni >= 0; ni--) {
+        if (nodes[ni].branchId === activeBranchId) { lastOnBranch = nodes[ni]; break; }
+      }
+      var activeBr = getBranch(activeBranchId);
+      parentId = lastOnBranch ? lastOnBranch.id : (activeBr ? activeBr.fromNode : null);
+    } else {
+      parentId = nodes.length > 0 ? nodes[nodes.length - 1].id : null;
+    }
     const node = {
       id, branchId: activeBranchId,
-      parentId: nodes.length > 0 ? nodes[nodes.length - 1].id : null,
+      parentId: parentId,
       userEl, modelEls, label: 'Turn',
       custom: false,
     };
@@ -317,16 +338,25 @@
   }
 
   // == Rehydration ==
+  // Helper: restore branches array so that branches[id].id === id (fill gaps with null)
+  function restoreBranches(savedBranches) {
+    if (!savedBranches || !savedBranches.length) return;
+    branches.length = 0;
+    savedBranches.forEach(function(b) {
+      if (!b) return;
+      while (branches.length <= b.id) branches.push(null);
+      branches[b.id] = b;
+    });
+    if (!branches[0]) branches[0] = { id: 0, name: 'main', color: COLORS[0], fromNode: null };
+  }
+
   function rehydrate(saved) {
     if (!saved || !saved.nodes || !saved.nodes.length) return false;
     console.log('[Aether] Rehydrating ' + saved.nodes.length + ' node(s), ' +
                 (saved.branches ? saved.branches.length : 0) + ' branch(es)');
 
     // Restore branches
-    if (saved.branches && saved.branches.length) {
-      branches.length = 0;
-      saved.branches.forEach(function(b) { branches.push(b); });
-    }
+    restoreBranches(saved.branches);
     // Restore custom labels
     if (saved.customLabels) customLabels = saved.customLabels;
     // Restore active branch
@@ -470,10 +500,7 @@
             setTimeout(tryRehydrate, 800 * attempts);
           } else {
             console.log('[Aether] Rehydration failed, falling back to scan');
-            if (saved.branches && saved.branches.length) {
-              branches.length = 0;
-              saved.branches.forEach(function(b) { branches.push(b); });
-            }
+            restoreBranches(saved.branches);
             if (saved.customLabels) customLabels = saved.customLabels;
             if (typeof saved.activeBranchId === 'number') activeBranchId = saved.activeBranchId;
             initialScan();
@@ -508,7 +535,7 @@
     updateStatusBar();
     renderGraph();
     autoSave();
-    console.log('[Aether] Switched to branch: ' + (branches[bid] ? branches[bid].name : bid));
+    console.log('[Aether] Switched to branch: ' + (getBranch(bid) ? getBranch(bid).name : bid));
   }
 
   function isBranchEmpty(branchId) {
@@ -518,8 +545,8 @@
 
   function deleteBranch(branchId) {
     if (branchId === 0) return;
-    var br = branches[branchId];
-    if (!br) return;
+    var br = getBranch(branchId);
+    if (!br || br.id === 0) return;
     // Switch away if currently on this branch
     if (activeBranchId === branchId) switchBranch(0);
     // Remove branch (set to null to preserve indices for other branch ids)
@@ -535,7 +562,7 @@
   function getAncestorChain(branchId) {
     // Build set of visible node IDs: all nodes on active branch,
     // plus all ancestors up to root along the parent chain
-    var br = branches[branchId];
+    var br = getBranch(branchId);
     if (!br) return new Set();
     var visibleNodes = new Set();
     // All nodes on this branch
@@ -572,7 +599,7 @@
     }
     var visible = getAncestorChain(activeBranchId);
     // Also: for main branch (0), show nodes up to the fork point
-    var activeBr = branches[activeBranchId];
+    var activeBr = getBranch(activeBranchId);
     if (activeBr && activeBr.fromNode !== null) {
       // Show main-branch nodes only up to fork point
       var forkId = activeBr.fromNode;
@@ -753,7 +780,7 @@
       var sub = getSubtreeNodes(dragSourceNodeId);
       if (sub.length > 0) {
         // Clone circles
-        var srcBr = branches[sub[0].branchId] || branches[0];
+        var srcBr = getBranch(sub[0].branchId);
         for (var i = 0; i < sub.length; i++) {
           var pos = nXY(sub[i]);
           var gc = mkCircle(pos.x, pos.y, G.r, 'none', srcBr.color, '1.5', null);
@@ -856,8 +883,8 @@
       return;
     }
 
-    var targetBr = branches[hoverBranchId];
-    if (!targetBr) { predictionPath.setAttribute('d', ''); resetSubtreeGhostPosition(); snapBranchId = -1; return; }
+    var targetBr = getBranch(hoverBranchId);
+    if (!targetBr || targetBr.id === 0 && hoverBranchId !== 0) { predictionPath.setAttribute('d', ''); resetSubtreeGhostPosition(); snapBranchId = -1; return; }
 
     // Find nearest node on target branch as anchor
     var anchor = findNearestNodeOnBranch(hoverBranchId, my);
@@ -1159,7 +1186,7 @@
 
   function updateStatusBar() {
     if (!statusBarEl) return;
-    var br = branches[activeBranchId];
+    var br = getBranch(activeBranchId);
     if (!br || activeBranchId === 0) {
       statusBarEl.style.display = 'none';
       return;
@@ -1242,48 +1269,71 @@
     labelBox.innerHTML = '';
     labelBox.style.height = totalH + 'px';
 
-    // Vertical lines
-    branches.forEach(function(br) {
-      if (!br) return;
-      var bn = nodes.filter(function(n) { return n.branchId === br.id; });
-      if (bn.length < 2) return;
-      var f = nXY(bn[0]), l = nXY(bn[bn.length - 1]);
-      svgEl.appendChild(mkLine(f.x, f.y, f.x, l.y, br.color, '1.5'));
+    // Edges: connect each node to the previous node on its branch,
+    // or draw a Bézier from the fork point for the first node on a sub-branch.
+    var lastOnBranch = {};
+    nodes.forEach(function(node) {
+      var pos = nXY(node);
+      var br = getBranch(node.branchId);
+      if (lastOnBranch[node.branchId] != null) {
+        // Straight line to previous node on same branch
+        var prev = nodes.find(function(n) { return n.id === lastOnBranch[node.branchId]; });
+        if (prev) {
+          var pp = nXY(prev);
+          svgEl.appendChild(mkLine(pp.x, pp.y, pos.x, pos.y, br.color, '1.5'));
+        }
+      } else if (br.fromNode !== null) {
+        // First node on a sub-branch: Bézier from fork point
+        var par = nodes.find(function(n) { return n.id === br.fromNode; });
+        if (par) {
+          var p = nXY(par);
+          var cpOff = Math.abs(pos.y - p.y) * 0.4;
+          var d = 'M' + p.x + ',' + p.y + ' C' + p.x + ',' + (p.y + cpOff) +
+                  ' ' + pos.x + ',' + (pos.y - cpOff) + ' ' + pos.x + ',' + pos.y;
+          var pth = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          pth.setAttribute('d', d);
+          pth.setAttribute('stroke', br.color);
+          pth.setAttribute('stroke-width', '1.5');
+          pth.setAttribute('fill', 'none');
+          pth.setAttribute('stroke-linecap', 'round');
+          svgEl.appendChild(pth);
+        }
+      }
+      lastOnBranch[node.branchId] = node.id;
     });
 
-    // Branch connectors
+    // Empty branch placeholders (only when branch has 0 real nodes)
     branches.forEach(function(br) {
       if (!br || br.fromNode === null) return;
+      var bn = nodes.filter(function(n) { return n.branchId === br.id; });
+      if (bn.length > 0) return;
       var par = nodes.find(function(n) { return n.id === br.fromNode; });
       if (!par) return;
       var p = nXY(par);
       var bx = G.pL + br.id * G.colW;
-      var bn = nodes.filter(function(n) { return n.branchId === br.id; });
-      var by = bn.length ? nXY(bn[0]).y : p.y + G.gap * 0.6;
+      var by = p.y + G.gap * 0.6;
       var cpOff = Math.abs(by - p.y) * 0.4;
       var d = 'M' + p.x + ',' + p.y + ' C' + p.x + ',' + (p.y + cpOff) +
               ' ' + bx + ',' + (by - cpOff) + ' ' + bx + ',' + by;
-      var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', d);
-      path.setAttribute('stroke', br.color);
-      path.setAttribute('stroke-width', '1.5');
-      path.setAttribute('fill', 'none');
-      path.setAttribute('stroke-linecap', 'round');
-      svgEl.appendChild(path);
-      if (bn.length === 0) {
-        svgEl.appendChild(mkCircle(bx, by, G.r - 1, 'none', br.color, '1.5', null));
-        var lb = mkLbl('Branch ' + br.id, labX, by - 7, false);
-        lb.style.color = br.color;
-        lb.style.fontStyle = 'italic';
-        lb.style.fontSize = '10px';
-        labelBox.appendChild(lb);
-      }
+      var pth = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      pth.setAttribute('d', d);
+      pth.setAttribute('stroke', br.color);
+      pth.setAttribute('stroke-width', '1.5');
+      pth.setAttribute('fill', 'none');
+      pth.setAttribute('stroke-linecap', 'round');
+      svgEl.appendChild(pth);
+      svgEl.appendChild(mkCircle(bx, by, G.r - 1, 'none', br.color, '1.5', null));
+      var lb = mkLbl(br.name, labX, by - 7, false);
+      lb.style.color = br.color;
+      lb.style.fontStyle = 'italic';
+      lb.style.fontSize = '10px';
+      labelBox.appendChild(lb);
     });
 
     // Nodes
     nodes.forEach(function(node) {
       var pos = nXY(node);
-      var br = branches[node.branchId] || branches[0];
+      var br = getBranch(node.branchId);
       var act = node.id === activeNodeId;
       if (act) {
         svgEl.appendChild(mkCircle(pos.x, pos.y, G.r + 4, 'none', br.color, '1', '0.25'));
