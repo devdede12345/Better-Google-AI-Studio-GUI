@@ -1,82 +1,71 @@
-/* ───────────────────────────────────────────────────────────
-   Aether — Google AI Studio Enhancer
-   Pure tagging — Zero-Clip collapse strategy
-   ─────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════
+   Aether - Google AI Studio Enhancer
+   Turn grouping + AetherMind Graph sidebar
+   ═══════════════════════════════════════════════════════════════ */
 
 
-/* ── Thread line on user turn (top of group) ──────────────────────── */
+/* ── Thread line: user turn (top of group) ────────────────────── */
 
 .aether-turn-unit::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: -4px;
+  left: 0; top: 0; bottom: -4px;
   width: 3px;
   border-radius: 3px 3px 0 0;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255,255,255,0.08);
   pointer-events: none;
   z-index: 5;
-  transition:
-    background 220ms ease,
-    box-shadow 220ms ease;
+  transition: background 220ms ease, box-shadow 220ms ease;
 }
 
-/* Thread line continues on model parts */
 .aether-can-hide::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: -4px;
-  bottom: -4px;
+  left: 0; top: -4px; bottom: -4px;
   width: 3px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255,255,255,0.08);
   pointer-events: none;
   z-index: 5;
-  transition:
-    background 220ms ease,
-    box-shadow 220ms ease;
+  transition: background 220ms ease, box-shadow 220ms ease;
 }
 
-/* Last model part closes the thread line */
-.aether-can-hide:last-of-type::before {
-  bottom: 0;
-  border-radius: 0 0 3px 3px;
-}
+.aether-can-hide { position: relative; }
 
-/* Ensure model parts are positioned for ::before */
-.aether-can-hide {
-  position: relative;
-}
-
-/* Hover glow on user element → brighten all thread lines in group */
 .aether-turn-unit:hover::before {
-  background: rgba(255, 255, 255, 0.22);
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.10);
+  background: rgba(255,255,255,0.22);
+  box-shadow: 0 0 6px rgba(255,255,255,0.1);
 }
 
 
-/* ── Action bar (lives inside .aether-turn-unit) ─────────────────── */
+/* ── Action bar (fold btn, top-right of user) ─────────────────── */
 
 .aether-action-bar {
   position: absolute;
-  top: 6px;
-  right: 10px;
+  top: 6px; right: 10px;
   z-index: 100;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  display: flex; align-items: center; gap: 4px;
   opacity: 0.15;
   transition: opacity 200ms ease;
   pointer-events: none;
 }
 
-.aether-turn-unit:hover .aether-action-bar {
-  opacity: 1;
+.aether-turn-unit:hover .aether-action-bar { opacity: 1; }
+
+
+/* ── Branch bar (bottom of last model element) ────────────────── */
+
+.aether-branch-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 10px 4px;
+  opacity: 0;
+  transition: opacity 200ms ease;
 }
 
+.aether-can-hide:hover .aether-branch-bar { opacity: 1; }
 
-/* ── Shared button base ──────────────────────────────────────────── */
+
+/* ── Button base ──────────────────────────────────────────────── */
 
 .aether-fold-btn,
 .aether-branch-btn {
@@ -89,7 +78,7 @@
   user-select: none;
   outline: none;
   white-space: nowrap;
-  font-family: 'Google Sans', 'Roboto', system-ui, sans-serif;
+  font-family: 'Google Sans','Roboto',system-ui,sans-serif;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.3px;
@@ -98,77 +87,64 @@
 }
 
 
-/* ── Fold button ─────────────────────────────────────────────────── */
+/* ── Fold button ──────────────────────────────────────────────── */
 
 .aether-fold-btn {
   padding: 3px 6px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.40);
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.4);
 }
 
 .aether-fold-btn:hover {
-  background: rgba(255, 255, 255, 0.10);
-  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.75);
 }
 
-.aether-fold-icon {
-  font-size: 10px;
-}
+.aether-fold-icon { font-size: 10px; }
 
 
-/* ── Branch button ───────────────────────────────────────────────── */
+/* ── Branch button ────────────────────────────────────────────── */
 
 .aether-branch-btn {
   padding: 4px 12px 4px 8px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255,255,255,0.04);
   backdrop-filter: blur(8px) saturate(1.3);
   -webkit-backdrop-filter: blur(8px) saturate(1.3);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.45);
 }
 
 .aether-branch-btn:hover {
-  background: rgba(255, 255, 255, 0.10);
-  border-color: rgba(255, 255, 255, 0.18);
-  color: rgba(255, 255, 255, 0.88);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 2px 8px rgba(0, 0, 0, 0.28);
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.18);
+  color: rgba(255,255,255,0.88);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 2px 8px rgba(0,0,0,0.28);
 }
 
 .aether-branch-btn--active {
   transform: scale(0.96);
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255,255,255,0.15);
 }
 
 .aether-branch-btn:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.35);
+  outline: 2px solid rgba(255,255,255,0.35);
   outline-offset: 2px;
 }
 
-.aether-branch-icon {
-  font-size: 13px;
-  line-height: 1;
-}
-
-.aether-branch-label {
-  display: inline-block;
-}
+.aether-branch-icon { font-size: 13px; line-height: 1; }
+.aether-branch-label { display: inline-block; }
 
 
-/* ══════════════════════════════════════════════════════════════════════
-   Zero-Clip Collapse — NO max-height / overflow on any container.
-   Only .aether-can-hide gets display:none; user content untouched.
-   ══════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   ZERO-CLIP COLLAPSE
+   ═══════════════════════════════════════════════════════════════ */
 
-/* Model parts: hidden when .aether-hidden is toggled by JS */
 .aether-can-hide.aether-hidden {
   display: none !important;
 }
 
-/* User part in collapsed state: guaranteed visible */
 .aether-keep-visible {
   display: block !important;
   opacity: 1 !important;
@@ -177,58 +153,203 @@
   overflow: visible !important;
 }
 
-/* Collapsed user element: visual accent */
 .aether-turn-unit.is-collapsed {
   border-left: 4px solid #4285f4 !important;
   padding-bottom: 15px;
 }
 
-/* Collapsed: thread line hidden (border-left takes over) */
-.aether-turn-unit.is-collapsed::before {
-  width: 0;
+.aether-turn-unit.is-collapsed::before { width: 0; }
+.aether-turn-unit.is-collapsed .aether-action-bar { opacity: 1; }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SIDEBAR  —  AetherMind Graph
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Toggle tab */
+.aether-sidebar-toggle {
+  position: fixed;
+  top: 50%; left: 0;
+  transform: translateY(-50%);
+  width: 28px; height: 52px;
+  background: rgba(30,30,30,0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  cursor: pointer;
+  z-index: 10001;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  color: rgba(255,255,255,0.6);
+  transition: left 300ms cubic-bezier(0.4,0,0.2,1),
+              background 200ms ease, color 200ms ease;
+  outline: none;
+  padding: 0;
 }
 
-/* Collapsed: keep action bar fully visible */
-.aether-turn-unit.is-collapsed .aether-action-bar {
-  opacity: 1;
+.aether-sidebar-toggle:hover {
+  background: rgba(50,50,50,0.92);
+  color: rgba(255,255,255,0.92);
+}
+
+.aether-toggle--open { left: 280px; }
+.aether-toggle-icon { pointer-events: none; }
+
+
+/* Panel */
+.aether-sidebar {
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  width: 280px;
+  background: rgba(24,24,24,0.88);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border-right: 1px solid rgba(255,255,255,0.07);
+  transform: translateX(-100%);
+  transition: transform 300ms cubic-bezier(0.4,0,0.2,1);
+  z-index: 10000;
+  display: flex; flex-direction: column;
+  font-family: 'Google Sans','Roboto',system-ui,sans-serif;
+  overflow: hidden;
+}
+
+.aether-sidebar--open { transform: translateX(0); }
+
+
+/* Header */
+.aether-sidebar-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.aether-sidebar-title {
+  font-size: 13px; font-weight: 600;
+  color: rgba(255,255,255,0.85);
+  letter-spacing: 0.2px;
+}
+
+.aether-sidebar-count {
+  font-size: 11px; font-weight: 400;
+  color: rgba(255,255,255,0.35);
 }
 
 
-/* ── Light mode ──────────────────────────────────────────────────── */
+/* Scroll area */
+.aether-sidebar-scroll {
+  flex: 1;
+  overflow-y: auto; overflow-x: hidden;
+  position: relative;
+  padding-bottom: 24px;
+}
+
+.aether-sidebar-scroll::-webkit-scrollbar { width: 4px; }
+.aether-sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+.aether-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1); border-radius: 2px;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   SVG GRAPH
+   ═══════════════════════════════════════════════════════════════ */
+
+.aether-graph-svg {
+  display: block;
+  position: absolute;
+  top: 0; left: 0;
+  pointer-events: none;
+}
+
+.aether-graph-node {
+  pointer-events: auto;
+  transition: r 150ms ease, fill 150ms ease;
+}
+
+.aether-graph-node:hover { r: 7; }
+
+
+/* Labels */
+.aether-graph-labels {
+  position: relative;
+  pointer-events: none;
+}
+
+.aether-graph-label {
+  position: absolute;
+  font-size: 11px; line-height: 16px;
+  color: rgba(255,255,255,0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+  cursor: pointer;
+  pointer-events: auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  transition: color 150ms ease, background 150ms ease;
+}
+
+.aether-graph-label:hover {
+  color: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.05);
+}
+
+.aether-graph-label--active {
+  color: rgba(255,255,255,0.95);
+  font-weight: 600;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   LIGHT MODE
+   ═══════════════════════════════════════════════════════════════ */
 
 @media (prefers-color-scheme: light) {
   .aether-turn-unit::before,
-  .aether-can-hide::before {
-    background: rgba(0, 0, 0, 0.06);
-  }
+  .aether-can-hide::before { background: rgba(0,0,0,0.06); }
 
   .aether-turn-unit:hover::before {
-    background: rgba(0, 0, 0, 0.16);
-    box-shadow: 0 0 4px rgba(0, 0, 0, 0.06);
+    background: rgba(0,0,0,0.16);
+    box-shadow: 0 0 4px rgba(0,0,0,0.06);
   }
 
-  .aether-fold-btn {
-    background: rgba(0, 0, 0, 0.04);
-    color: rgba(0, 0, 0, 0.35);
-  }
-  .aether-fold-btn:hover {
-    background: rgba(0, 0, 0, 0.08);
-    color: rgba(0, 0, 0, 0.65);
-  }
+  .aether-fold-btn { background: rgba(0,0,0,0.04); color: rgba(0,0,0,0.35); }
+  .aether-fold-btn:hover { background: rgba(0,0,0,0.08); color: rgba(0,0,0,0.65); }
 
   .aether-branch-btn {
-    background: rgba(0, 0, 0, 0.03);
-    border-color: rgba(0, 0, 0, 0.06);
-    color: rgba(0, 0, 0, 0.40);
+    background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.06);
+    color: rgba(0,0,0,0.4);
   }
   .aether-branch-btn:hover {
-    background: rgba(0, 0, 0, 0.07);
-    border-color: rgba(0, 0, 0, 0.14);
-    color: rgba(0, 0, 0, 0.78);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.10);
+    background: rgba(0,0,0,0.07); border-color: rgba(0,0,0,0.14);
+    color: rgba(0,0,0,0.78); box-shadow: 0 2px 6px rgba(0,0,0,0.1);
   }
 
-  .aether-turn-unit.is-collapsed {
-    border-left-color: #1a73e8 !important;
+  .aether-turn-unit.is-collapsed { border-left-color: #1a73e8 !important; }
+
+  .aether-sidebar-toggle {
+    background: rgba(245,245,245,0.92);
+    border-color: rgba(0,0,0,0.08);
+    color: rgba(0,0,0,0.5);
   }
+  .aether-sidebar-toggle:hover {
+    background: rgba(235,235,235,0.96);
+    color: rgba(0,0,0,0.8);
+  }
+
+  .aether-sidebar {
+    background: rgba(250,250,250,0.92);
+    border-right-color: rgba(0,0,0,0.06);
+  }
+  .aether-sidebar-header { border-bottom-color: rgba(0,0,0,0.06); }
+  .aether-sidebar-title { color: rgba(0,0,0,0.85); }
+  .aether-sidebar-count { color: rgba(0,0,0,0.35); }
+  .aether-sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); }
+
+  .aether-graph-label { color: rgba(0,0,0,0.5); }
+  .aether-graph-label:hover { color: rgba(0,0,0,0.85); background: rgba(0,0,0,0.04); }
+  .aether-graph-label--active { color: rgba(0,0,0,0.95); }
 }
