@@ -23,17 +23,107 @@
     '#ff6d01','#46bdc6','#ab47bc','#ec407a',
   ];
 
+  const BRANCH_ATTR = 'data-aether-branch';
+
   // == State ==
   let groupCount = 0;
   const nodes = [];
-  const branches = [{ id: 0, color: COLORS[0], fromNode: null }];
+  const branches = [{ id: 0, name: 'main', color: COLORS[0], fromNode: null }];
+  let activeBranchId = 0;
   let activeNodeId = null;
   let sidebarOpen = false;
-  let sidebar, svgEl, labelBox, toggleBtn, intersectionObs;
+  let sidebar, svgEl, labelBox, toggleBtn, intersectionObs, statusBarEl, ctxMenu;
   const visibleSet = new Set();
   let runTimer = null;
   const RUN_DEBOUNCE = 600;
   let lastUrl = location.href;
+  const STORAGE_KEY = 'aether_custom_labels';
+  const BRANCH_STORAGE_KEY = 'aether_branches';
+  let customLabels = {};
+
+  // == Storage helpers ==
+  function storageKey() {
+    // Scope labels per playground URL path (ignore query/hash)
+    return STORAGE_KEY + ':' + location.pathname;
+  }
+
+  function loadCustomLabels(cb) {
+    var key = storageKey();
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(key, function(result) {
+        customLabels = result[key] || {};
+        console.log('[Aether] Loaded ' + Object.keys(customLabels).length + ' custom label(s)');
+        if (cb) cb();
+      });
+    } else {
+      // Fallback for dev/testing without extension context
+      try { customLabels = JSON.parse(localStorage.getItem(key) || '{}'); } catch(e) { customLabels = {}; }
+      if (cb) cb();
+    }
+  }
+
+  function saveCustomLabels() {
+    var key = storageKey();
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      var data = {};
+      data[key] = customLabels;
+      chrome.storage.local.set(data);
+    } else {
+      try { localStorage.setItem(key, JSON.stringify(customLabels)); } catch(e) {}
+    }
+  }
+
+  // Branch persistence
+  function branchStorageKey() { return BRANCH_STORAGE_KEY + ':' + location.pathname; }
+
+  function saveBranches() {
+    var key = branchStorageKey();
+    var data = branches.map(function(b) {
+      return { id: b.id, name: b.name, color: b.color, fromNode: b.fromNode };
+    });
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      var obj = {}; obj[key] = data;
+      chrome.storage.local.set(obj);
+    } else {
+      try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
+    }
+  }
+
+  function loadBranches(cb) {
+    var key = branchStorageKey();
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(key, function(result) {
+        var saved = result[key];
+        if (saved && saved.length) {
+          branches.length = 0;
+          saved.forEach(function(b) { branches.push(b); });
+          console.log('[Aether] Loaded ' + branches.length + ' branch(es)');
+        }
+        if (cb) cb();
+      });
+    } else {
+      try {
+        var saved = JSON.parse(localStorage.getItem(key) || '[]');
+        if (saved.length) { branches.length = 0; saved.forEach(function(b) { branches.push(b); }); }
+      } catch(e) {}
+      if (cb) cb();
+    }
+  }
+
+  function getCustomLabel(nodeId) {
+    return customLabels[String(nodeId)] || null;
+  }
+
+  function setCustomLabel(nodeId, text) {
+    if (text) customLabels[String(nodeId)] = text;
+    else delete customLabels[String(nodeId)];
+    saveCustomLabels();
+  }
+
+  // Resolve display label: custom > auto-extracted
+  function resolveLabel(node) {
+    return getCustomLabel(node.id) || getLabel(node.userEl);
+  }
 
   // == Helpers ==
   function isUserEl(el) {
@@ -145,7 +235,7 @@
       e.stopPropagation(); e.preventDefault();
       b.classList.add('aether-branch-btn--active');
       setTimeout(() => b.classList.remove('aether-branch-btn--active'), 400);
-      doBranch(nodeId);
+      showBranchDialog(nodeId);
     });
     return b;
   }
@@ -182,16 +272,25 @@
     bbar.appendChild(makeBranchBtn(id));
     last.appendChild(bbar);
 
-    // Graph node
+    // Graph node — all scanned nodes go to branch 0 (main) by default
     const node = {
-      id, branchId: 0,
+      id, branchId: activeBranchId,
       parentId: nodes.length > 0 ? nodes[nodes.length - 1].id : null,
-      userEl, modelEls, label: getLabel(userEl),
+      userEl, modelEls, label: 'Turn',
+      custom: false,
     };
+    // Resolve label: custom (persisted) > auto-extracted
+    var cust = getCustomLabel(id);
+    if (cust) { node.label = cust; node.custom = true; }
+    else { node.label = getLabel(userEl); }
+    // Tag DOM with branch id
+    userEl.setAttribute(BRANCH_ATTR, String(node.branchId));
+    modelEls.forEach(function(m) { m.setAttribute(BRANCH_ATTR, String(node.branchId)); });
     nodes.push(node);
     if (intersectionObs) intersectionObs.observe(userEl);
+    applyFocusMode();
     renderGraph();
-    console.log('[Aether] Group ' + id + ': "' + node.label + '"');
+    console.log('[Aether] Group ' + id + ' (branch ' + node.branchId + '): "' + node.label + '"');
   }
 
   function captureOrphans() {
@@ -219,15 +318,228 @@
   }
 
   // == Branching ==
-  function doBranch(fromNodeId) {
+  function doBranch(fromNodeId, branchName) {
     const bid = branches.length;
     const color = COLORS[bid % COLORS.length];
-    branches.push({ id: bid, color, fromNode: fromNodeId });
-    console.info('[Aether] Branch ' + bid + ' from node ' + fromNodeId + ' (' + color + ')');
+    const name = branchName || ('Branch_' + bid);
+    branches.push({ id: bid, name: name, color: color, fromNode: fromNodeId });
+    saveBranches();
+    console.info('[Aether] Branch "' + name + '" (id=' + bid + ') from node ' + fromNodeId + ' (' + color + ')');
     document.dispatchEvent(new CustomEvent('aether:branch', {
-      detail: { fromNodeId, branchId: bid, color }, bubbles: true,
+      detail: { fromNodeId, branchId: bid, color, name }, bubbles: true,
     }));
+    switchBranch(bid);
+  }
+
+  function switchBranch(bid) {
+    activeBranchId = bid;
+    applyFocusMode();
+    updateStatusBar();
     renderGraph();
+    console.log('[Aether] Switched to branch: ' + (branches[bid] ? branches[bid].name : bid));
+  }
+
+  // == Focus Mode ==
+  function getAncestorChain(branchId) {
+    // Build set of visible node IDs: all nodes on active branch,
+    // plus all ancestors up to root along the parent chain
+    var br = branches[branchId];
+    if (!br) return new Set();
+    var visibleNodes = new Set();
+    // All nodes on this branch
+    nodes.forEach(function(n) { if (n.branchId === branchId) visibleNodes.add(n.id); });
+    // Walk up parent branch: if branch has a fromNode, include all nodes
+    // on the parent branch from root up to (and including) fromNode
+    if (br.fromNode !== null) {
+      var parentNode = nodes.find(function(n) { return n.id === br.fromNode; });
+      if (parentNode) {
+        // Include all nodes on parent's branch up to the fork point
+        var pbid = parentNode.branchId;
+        nodes.forEach(function(n) {
+          if (n.branchId === pbid) {
+            visibleNodes.add(n.id);
+            // Stop adding after the fork node
+            if (n.id === br.fromNode) return;
+          }
+        });
+        // Recursively include ancestors of parent branch
+        var parentAncestors = getAncestorChain(pbid);
+        parentAncestors.forEach(function(nid) { visibleNodes.add(nid); });
+      }
+    }
+    return visibleNodes;
+  }
+
+  function applyFocusMode() {
+    if (activeBranchId === 0) {
+      // main branch: show everything
+      nodes.forEach(function(n) {
+        showNodeDom(n, true);
+      });
+      return;
+    }
+    var visible = getAncestorChain(activeBranchId);
+    // Also: for main branch (0), show nodes up to the fork point
+    var activeBr = branches[activeBranchId];
+    if (activeBr && activeBr.fromNode !== null) {
+      // Show main-branch nodes only up to fork point
+      var forkId = activeBr.fromNode;
+      var pastFork = false;
+      nodes.forEach(function(n) {
+        if (n.branchId === 0) {
+          if (pastFork && !visible.has(n.id)) {
+            showNodeDom(n, false);
+          } else {
+            showNodeDom(n, true);
+          }
+          if (n.id === forkId) pastFork = true;
+        } else if (n.branchId === activeBranchId) {
+          showNodeDom(n, true);
+        } else {
+          showNodeDom(n, !visible.has(n.id) ? false : true);
+        }
+      });
+    } else {
+      nodes.forEach(function(n) {
+        showNodeDom(n, visible.has(n.id));
+      });
+    }
+  }
+
+  function showNodeDom(node, show) {
+    var cls = 'aether-branch-hidden';
+    if (show) {
+      node.userEl.classList.remove(cls);
+      node.modelEls.forEach(function(m) { m.classList.remove(cls); });
+    } else {
+      node.userEl.classList.add(cls);
+      node.modelEls.forEach(function(m) { m.classList.add(cls); });
+    }
+  }
+
+  // == Branch naming dialog ==
+  function showBranchDialog(fromNodeId) {
+    // Remove existing dialog
+    var old = document.querySelector('.aether-branch-dialog');
+    if (old) old.remove();
+    var defaultName = 'Branch_' + branches.length;
+    var overlay = document.createElement('div');
+    overlay.className = 'aether-branch-dialog-overlay';
+    var dialog = document.createElement('div');
+    dialog.className = 'aether-branch-dialog';
+    dialog.innerHTML =
+      '<div class="aether-dialog-title">\uD83C\uDF31 New Branch from Turn #' + fromNodeId + '</div>' +
+      '<input type="text" class="aether-dialog-input" placeholder="' + defaultName + '" value="' + defaultName + '">' +
+      '<div class="aether-dialog-actions">' +
+        '<button class="aether-dialog-btn aether-dialog-cancel">Cancel</button>' +
+        '<button class="aether-dialog-btn aether-dialog-confirm">Create</button>' +
+      '</div>';
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    var input = dialog.querySelector('.aether-dialog-input');
+    input.focus(); input.select();
+
+    function doCreate() {
+      var name = input.value.trim() || defaultName;
+      overlay.remove();
+      doBranch(fromNodeId, name);
+    }
+    function doCancel() { overlay.remove(); }
+    dialog.querySelector('.aether-dialog-confirm').addEventListener('click', doCreate);
+    dialog.querySelector('.aether-dialog-cancel').addEventListener('click', doCancel);
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); doCreate(); }
+      if (e.key === 'Escape') { e.preventDefault(); doCancel(); }
+    });
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) doCancel();
+    });
+  }
+
+  // == Context menu ==
+  function createCtxMenu() {
+    ctxMenu = document.createElement('div');
+    ctxMenu.className = 'aether-ctx-menu';
+    ctxMenu.style.display = 'none';
+    ctxMenu.innerHTML =
+      '<div class="aether-ctx-item" data-action="branch">\uD83C\uDF31 New Branch from here</div>' +
+      '<div class="aether-ctx-item" data-action="switch-main">\u2B95 Switch to main</div>';
+    document.body.appendChild(ctxMenu);
+    // Close on click-away
+    document.addEventListener('click', function() { ctxMenu.style.display = 'none'; });
+  }
+
+  function showCtxMenu(x, y, nodeId) {
+    if (!ctxMenu) createCtxMenu();
+    ctxMenu.style.left = x + 'px';
+    ctxMenu.style.top = y + 'px';
+    ctxMenu.style.display = '';
+    // Rebind actions for this node
+    var items = ctxMenu.querySelectorAll('.aether-ctx-item');
+    items.forEach(function(item) {
+      var clone = item.cloneNode(true);
+      item.parentNode.replaceChild(clone, item);
+    });
+    var branchItem = ctxMenu.querySelector('[data-action="branch"]');
+    var switchItem = ctxMenu.querySelector('[data-action="switch-main"]');
+    branchItem.addEventListener('click', function(e) {
+      e.stopPropagation();
+      ctxMenu.style.display = 'none';
+      showBranchDialog(nodeId);
+    });
+    switchItem.addEventListener('click', function(e) {
+      e.stopPropagation();
+      ctxMenu.style.display = 'none';
+      switchBranch(0);
+    });
+    // Add branch-specific switch options
+    var existingExtras = ctxMenu.querySelectorAll('.aether-ctx-item--dynamic');
+    existingExtras.forEach(function(el) { el.remove(); });
+    branches.forEach(function(br) {
+      if (br.id === 0) return;
+      var d = document.createElement('div');
+      d.className = 'aether-ctx-item aether-ctx-item--dynamic';
+      d.textContent = '\u2B95 Switch to ' + br.name;
+      if (br.id === activeBranchId) { d.style.fontWeight = '600'; d.style.color = br.color; }
+      d.addEventListener('click', function(e) {
+        e.stopPropagation();
+        ctxMenu.style.display = 'none';
+        switchBranch(br.id);
+      });
+      ctxMenu.appendChild(d);
+    });
+  }
+
+  // == Status Bar ==
+  function createStatusBar() {
+    statusBarEl = document.createElement('div');
+    statusBarEl.className = 'aether-status-bar';
+    statusBarEl.style.display = 'none';
+    document.body.appendChild(statusBarEl);
+  }
+
+  function updateStatusBar() {
+    if (!statusBarEl) return;
+    var br = branches[activeBranchId];
+    if (!br || activeBranchId === 0) {
+      statusBarEl.style.display = 'none';
+      return;
+    }
+    statusBarEl.style.display = '';
+    statusBarEl.innerHTML = '';
+    var dot = document.createElement('span');
+    dot.className = 'aether-status-dot';
+    dot.style.background = br.color;
+    statusBarEl.appendChild(dot);
+    var txt = document.createElement('span');
+    txt.className = 'aether-status-text';
+    txt.textContent = 'Active Branch: ' + br.name;
+    statusBarEl.appendChild(txt);
+    var exitBtn = document.createElement('button');
+    exitBtn.className = 'aether-status-exit';
+    exitBtn.textContent = '\u2715 Back to main';
+    exitBtn.addEventListener('click', function() { switchBranch(0); });
+    statusBarEl.appendChild(exitBtn);
   }
 
   // == Sidebar ==
@@ -339,11 +651,26 @@
       c.classList.add('aether-graph-node');
       c.dataset.nodeId = String(node.id);
       c.style.cursor = 'pointer';
-      c.addEventListener('click', function() { scrollToNode(node.id); });
+      c.addEventListener('click', function() {
+        scrollToNode(node.id);
+        // Auto-switch to this node's branch
+        if (node.branchId !== activeBranchId) switchBranch(node.branchId);
+      });
+      c.addEventListener('contextmenu', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        showCtxMenu(e.pageX, e.pageY, node.id);
+      });
       svgEl.appendChild(c);
 
-      var lb = mkLbl(node.label, labX, pos.y - 7, act);
-      lb.addEventListener('click', function() { scrollToNode(node.id); });
+      var lb = mkLbl(node.label, labX, pos.y - 7, act, node.id);
+      lb.addEventListener('click', function() {
+        scrollToNode(node.id);
+        if (node.branchId !== activeBranchId) switchBranch(node.branchId);
+      });
+      lb.addEventListener('contextmenu', function(e) {
+        e.preventDefault(); e.stopPropagation();
+        showCtxMenu(e.pageX, e.pageY, node.id);
+      });
       labelBox.appendChild(lb);
     });
   }
@@ -366,19 +693,72 @@
     return c;
   }
 
-  function mkLbl(text, left, top, active) {
+  function mkLbl(text, left, top, active, nodeId) {
     var d = document.createElement('div');
     d.className = 'aether-graph-label' + (active ? ' aether-graph-label--active' : '');
+    if (getCustomLabel(nodeId)) d.classList.add('aether-graph-label--custom');
     d.textContent = text;
+    d.title = 'Double-click to rename';
     d.style.top = top + 'px';
     d.style.left = left + 'px';
+    // Double-click to inline-edit
+    d.addEventListener('dblclick', function(e) {
+      e.stopPropagation();
+      startInlineEdit(d, nodeId);
+    });
     return d;
+  }
+
+  // == Inline editing ==
+  function startInlineEdit(labelEl, nodeId) {
+    if (labelEl.querySelector('input')) return; // already editing
+    var node = nodes.find(function(n) { return n.id === nodeId; });
+    if (!node) return;
+    var origText = node.label;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'aether-label-input';
+    input.value = origText;
+    labelEl.textContent = '';
+    labelEl.appendChild(input);
+    input.focus();
+    input.select();
+
+    var committed = false;
+    function commit() {
+      if (committed) return;
+      committed = true;
+      var val = input.value.trim();
+      if (val && val !== origText) {
+        node.label = val;
+        node.custom = true;
+        setCustomLabel(nodeId, val);
+      } else if (!val) {
+        // Empty = reset to auto
+        node.label = getLabel(node.userEl);
+        node.custom = false;
+        setCustomLabel(nodeId, null);
+      }
+      renderGraph();
+    }
+    function cancel() {
+      if (committed) return;
+      committed = true;
+      renderGraph();
+    }
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
   }
 
   // == Navigation ==
   function scrollToNode(id) {
     var node = nodes.find(function(n) { return n.id === id; });
     if (!node) return;
+    // Make sure the node is visible before scrolling
+    if (node.branchId !== activeBranchId) switchBranch(node.branchId);
     node.userEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setActiveNode(id);
   }
@@ -425,6 +805,8 @@
   function refreshLabels() {
     var changed = false;
     nodes.forEach(function(node) {
+      // Skip nodes with custom (user-renamed) labels
+      if (node.custom) return;
       var fresh = getLabel(node.userEl);
       if (fresh !== node.label && fresh !== 'Turn') {
         node.label = fresh;
@@ -448,7 +830,8 @@
     document.querySelectorAll('[' + PROCESSED + ']').forEach(function(el) {
       el.removeAttribute(PROCESSED);
       el.removeAttribute(GROUP_ATTR);
-      el.classList.remove(UNIT_CLS, KEEP_CLS, HIDEABLE, HIDDEN_CLS, COLLAPSED);
+      el.removeAttribute(BRANCH_ATTR);
+      el.classList.remove(UNIT_CLS, KEEP_CLS, HIDEABLE, HIDDEN_CLS, COLLAPSED, 'aether-branch-hidden');
     });
     document.querySelectorAll('.aether-action-bar, .aether-branch-bar').forEach(function(el) {
       el.remove();
@@ -457,9 +840,11 @@
     groupCount = 0;
     nodes.length = 0;
     branches.length = 0;
-    branches.push({ id: 0, color: COLORS[0], fromNode: null });
+    branches.push({ id: 0, name: 'main', color: COLORS[0], fromNode: null });
+    activeBranchId = 0;
     activeNodeId = null;
     visibleSet.clear();
+    updateStatusBar();
     renderGraph();
     // Re-scan with retries for SPA lazy-load
     initialScan();
@@ -526,6 +911,14 @@
   window.addEventListener('popstate', function() { setTimeout(checkUrlChange, 100); });
 
   console.log('[Aether] Loaded on ' + location.href);
-  initialScan();
+  createStatusBar();
+  createCtxMenu();
+  // Load persisted data, then scan
+  loadCustomLabels(function() {
+    loadBranches(function() {
+      initialScan();
+      updateStatusBar();
+    });
+  });
   setTimeout(function() { refreshLabels(); diagnose(); }, 5000);
 })();

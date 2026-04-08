@@ -3,6 +3,7 @@
   "name": "Better Google AI Studio",
   "version": "1.0.0",
   "description": "Enhances Google AI Studio with conversation branching capabilities.",
+  "permissions": ["storage"],
   "host_permissions": [
     "https://aistudio.google.com/*"
   ],
