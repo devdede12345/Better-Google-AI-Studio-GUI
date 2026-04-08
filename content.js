@@ -589,6 +589,154 @@
     }
   }
 
+  // == Drag & Drop ==
+  var customDrag = null;
+  var dropZoneContainer = null;
+
+  function setupDropZones() {
+    if (!dropZoneContainer) {
+      dropZoneContainer = document.createElement('div');
+      dropZoneContainer.className = 'aether-dropzone-container';
+      var scroll = sidebar.querySelector('.aether-sidebar-scroll');
+      scroll.appendChild(dropZoneContainer);
+    }
+  }
+
+  function showDropZones(excludeBranchId) {
+    if (!dropZoneContainer) return;
+    dropZoneContainer.innerHTML = '';
+    dropZoneContainer.classList.add('aether-dropzone--active');
+    var totalH = G.pT + Math.max(1, nodes.length) * G.gap + 40;
+    var zoneW = Math.max(G.colW * 2, 32);
+    branches.forEach(function(br) {
+      if (br.id === excludeBranchId) return;
+      var zone = document.createElement('div');
+      zone.className = 'aether-dropzone';
+      zone.style.left = (G.pL + br.id * G.colW - zoneW / 2) + 'px';
+      zone.style.top = '0';
+      zone.style.width = zoneW + 'px';
+      zone.style.height = totalH + 'px';
+      zone.dataset.branchId = String(br.id);
+      var lbl = document.createElement('div');
+      lbl.className = 'aether-dropzone-label';
+      lbl.textContent = br.name;
+      lbl.style.color = br.color;
+      zone.appendChild(lbl);
+      // HTML5 DnD targets
+      zone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        zone.classList.add('aether-dropzone--hover');
+      });
+      zone.addEventListener('dragleave', function() {
+        zone.classList.remove('aether-dropzone--hover');
+      });
+      zone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        zone.classList.remove('aether-dropzone--hover');
+        var nid = parseInt(e.dataTransfer.getData('text/plain'));
+        if (!isNaN(nid)) handleNodeDrop(nid, br.id);
+      });
+      dropZoneContainer.appendChild(zone);
+    });
+  }
+
+  function hideDropZones() {
+    if (!dropZoneContainer) return;
+    dropZoneContainer.classList.remove('aether-dropzone--active');
+    dropZoneContainer.innerHTML = '';
+  }
+
+  function handleNodeDrop(nodeId, targetBranchId) {
+    var node = nodes.find(function(n) { return n.id === nodeId; });
+    if (!node) return;
+    var srcBid = node.branchId;
+    if (srcBid === targetBranchId) return;
+    // Cascade: this node + all subsequent nodes on same source branch
+    var startIdx = nodes.indexOf(node);
+    var toMove = [];
+    for (var i = startIdx; i < nodes.length; i++) {
+      if (nodes[i].branchId === srcBid) toMove.push(nodes[i]);
+    }
+    toMove.forEach(function(n) {
+      n.branchId = targetBranchId;
+      n.userEl.setAttribute(BRANCH_ATTR, String(targetBranchId));
+      n.modelEls.forEach(function(m) { m.setAttribute(BRANCH_ATTR, String(targetBranchId)); });
+    });
+    console.log('[Aether] Moved ' + toMove.length + ' node(s) branch ' + srcBid + ' \u2192 ' + targetBranchId);
+    applyFocusMode();
+    renderGraph();
+    autoSave();
+  }
+
+  // Custom drag for SVG circles (no native HTML5 DnD on SVG)
+  // Uses a 5px movement threshold to distinguish click from drag.
+  var DRAG_THRESHOLD = 5;
+
+  function startCustomDrag(nodeId, e) {
+    var nd = nodes.find(function(n) { return n.id === nodeId; });
+    if (!nd) return;
+    e.preventDefault();
+    var startX = e.clientX, startY = e.clientY;
+    var dragging = false;
+
+    function onMove(ev) {
+      var dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (!dragging) {
+        if (Math.abs(dx) + Math.abs(dy) < DRAG_THRESHOLD) return;
+        // Threshold met — start real drag
+        dragging = true;
+        setActiveNode(nodeId);
+        showDropZones(nd.branchId);
+        var ghost = document.createElement('div');
+        ghost.className = 'aether-drag-ghost';
+        ghost.textContent = nd.label;
+        document.body.appendChild(ghost);
+        customDrag = { nodeId: nodeId, ghost: ghost, branchId: nd.branchId };
+      }
+      customDrag.ghost.style.left = (ev.clientX + 12) + 'px';
+      customDrag.ghost.style.top = (ev.clientY - 10) + 'px';
+      if (dropZoneContainer) {
+        var zones = dropZoneContainer.querySelectorAll('.aether-dropzone');
+        zones.forEach(function(z) {
+          var r = z.getBoundingClientRect();
+          z.classList.toggle('aether-dropzone--hover',
+            ev.clientX >= r.left && ev.clientX <= r.right &&
+            ev.clientY >= r.top && ev.clientY <= r.bottom);
+        });
+      }
+    }
+
+    function onUp(ev) {
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('mouseup', onUp, true);
+      if (!dragging) {
+        // Was a simple click, not a drag — let click handler fire
+        return;
+      }
+      var targetBid = -1;
+      if (dropZoneContainer) {
+        var zones = dropZoneContainer.querySelectorAll('.aether-dropzone');
+        zones.forEach(function(z) {
+          var r = z.getBoundingClientRect();
+          if (ev.clientX >= r.left && ev.clientX <= r.right &&
+              ev.clientY >= r.top && ev.clientY <= r.bottom) {
+            targetBid = parseInt(z.dataset.branchId);
+          }
+        });
+      }
+      if (customDrag) customDrag.ghost.remove();
+      hideDropZones();
+      if (targetBid >= 0 && customDrag && targetBid !== customDrag.branchId) {
+        handleNodeDrop(customDrag.nodeId, targetBid);
+      }
+      customDrag = null;
+    }
+
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('mouseup', onUp, true);
+  }
+
   // == Branch naming dialog ==
   function showBranchDialog(fromNodeId) {
     // Remove existing dialog
@@ -767,6 +915,7 @@
     labelBox = document.createElement('div');
     labelBox.className = 'aether-graph-labels';
     scroll.appendChild(labelBox);
+    setupDropZones();
   }
 
   // == Graph Rendering ==
@@ -845,15 +994,18 @@
       var c = mkCircle(pos.x, pos.y, act ? G.r + 1 : G.r, fill, br.color, sw, null);
       c.classList.add('aether-graph-node');
       c.dataset.nodeId = String(node.id);
-      c.style.cursor = 'pointer';
+      c.style.cursor = 'grab';
       c.addEventListener('click', function() {
         scrollToNode(node.id);
-        // Auto-switch to this node's branch
         if (node.branchId !== activeBranchId) switchBranch(node.branchId);
       });
       c.addEventListener('contextmenu', function(e) {
         e.preventDefault(); e.stopPropagation();
         showCtxMenu(e.pageX, e.pageY, node.id);
+      });
+      c.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        startCustomDrag(node.id, e);
       });
       svgEl.appendChild(c);
 
@@ -893,13 +1045,27 @@
     d.className = 'aether-graph-label' + (active ? ' aether-graph-label--active' : '');
     if (getCustomLabel(nodeId)) d.classList.add('aether-graph-label--custom');
     d.textContent = text;
-    d.title = 'Double-click to rename';
+    d.title = 'Drag to move \u2022 Double-click to rename';
     d.style.top = top + 'px';
     d.style.left = left + 'px';
     // Double-click to inline-edit
     d.addEventListener('dblclick', function(e) {
       e.stopPropagation();
       startInlineEdit(d, nodeId);
+    });
+    // HTML5 Drag & Drop
+    d.setAttribute('draggable', 'true');
+    d.addEventListener('dragstart', function(e) {
+      e.dataTransfer.setData('text/plain', String(nodeId));
+      e.dataTransfer.effectAllowed = 'move';
+      d.classList.add('aether-label--dragging');
+      setActiveNode(nodeId);
+      var nd = nodes.find(function(n) { return n.id === nodeId; });
+      if (nd) showDropZones(nd.branchId);
+    });
+    d.addEventListener('dragend', function() {
+      d.classList.remove('aether-label--dragging');
+      hideDropZones();
     });
     return d;
   }

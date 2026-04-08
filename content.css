@@ -367,6 +367,81 @@
 
 
 /* ═══════════════════════════════════════════════════════════════
+   DRAG & DROP
+   ═══════════════════════════════════════════════════════════════ */
+
+.aether-graph-node { cursor: grab; }
+.aether-graph-node:active { cursor: grabbing; }
+
+.aether-label--dragging {
+  opacity: 0.35 !important;
+  outline: 1px dashed rgba(255,255,255,0.25);
+  outline-offset: 2px;
+}
+
+.aether-drag-ghost {
+  position: fixed;
+  z-index: 10300;
+  padding: 4px 10px;
+  font-family: 'Google Sans','Roboto',system-ui,sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(30,30,30,0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+  pointer-events: none;
+  white-space: nowrap;
+  transform: scale(0.95);
+  opacity: 0.92;
+}
+
+.aether-dropzone-container {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.aether-dropzone-container.aether-dropzone--active {
+  pointer-events: auto;
+}
+
+.aether-dropzone {
+  position: absolute;
+  border: 2px dashed rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+}
+
+.aether-dropzone--hover {
+  border-style: solid !important;
+  border-color: rgba(255,255,255,0.4) !important;
+  background: rgba(255,255,255,0.08) !important;
+  box-shadow: 0 0 16px rgba(255,255,255,0.08), inset 0 0 12px rgba(255,255,255,0.04);
+}
+
+.aether-dropzone-label {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Google Sans','Roboto',system-ui,sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
    CONTEXT MENU
    ═══════════════════════════════════════════════════════════════ */
 
@@ -614,6 +689,26 @@
     background: rgba(0,0,0,0.06);
     border-color: rgba(26,115,232,0.5);
     box-shadow: 0 0 0 2px rgba(26,115,232,0.12);
+  }
+
+  /* Drag & Drop */
+  .aether-label--dragging {
+    outline-color: rgba(0,0,0,0.2);
+  }
+  .aether-drag-ghost {
+    color: #000;
+    background: rgba(255,255,255,0.95);
+    border-color: rgba(0,0,0,0.12);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  }
+  .aether-dropzone {
+    border-color: rgba(0,0,0,0.1);
+    background: rgba(0,0,0,0.015);
+  }
+  .aether-dropzone--hover {
+    border-color: rgba(0,0,0,0.35) !important;
+    background: rgba(0,0,0,0.06) !important;
+    box-shadow: 0 0 16px rgba(0,0,0,0.06);
   }
 
   /* Context menu */
