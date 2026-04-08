@@ -31,6 +31,9 @@
   let sidebarOpen = false;
   let sidebar, svgEl, labelBox, toggleBtn, intersectionObs;
   const visibleSet = new Set();
+  let runTimer = null;
+  const RUN_DEBOUNCE = 600;
+  let lastUrl = location.href;
 
   // == Helpers ==
   function isUserEl(el) {
@@ -45,9 +48,50 @@
     return false;
   }
 
+  // Material Icon ligatures & button text to strip from labels
+  const ICON_NOISE = /\b(edit_more_vert|more_vert|edit|content_copy|thumb_up|thumb_down|volume_up|share|replay|stop|close|menu|add|send|mic|attach_file|image|code|delete|check|done|arrow_drop_down|expand_more|expand_less|chevron_right|chevron_left|keyboard_arrow_down|keyboard_arrow_up)\b/gi;
+
   function getLabel(el) {
-    const t = (el.innerText || el.textContent || '').trim();
-    return t.slice(0, 50) + (t.length > 50 ? '...' : '') || 'Turn';
+    // Try to find a dedicated text container first
+    const candidates = el.querySelectorAll(
+      'p, .user-message, .prompt-text, .text-content, ' +
+      '.query-text, [data-text], .turn-text, .message-content'
+    );
+    let raw = '';
+    for (const c of candidates) {
+      const t = (c.innerText || c.textContent || '').trim();
+      if (t.length > 2) { raw = t; break; }
+    }
+    // Fallback: collect text nodes directly, skipping buttons/icons
+    if (!raw) {
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const p = node.parentElement;
+          if (!p) return NodeFilter.FILTER_REJECT;
+          const tag = p.tagName.toLowerCase();
+          if (tag === 'button' || tag === 'mat-icon' || tag === 'ms-icon' ||
+              tag === 'mat-button' || p.classList.contains('mat-icon') ||
+              p.classList.contains('material-icons') ||
+              p.closest('button') || p.closest('mat-icon') ||
+              p.closest('.aether-action-bar') || p.closest('.aether-branch-bar')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      const parts = [];
+      let n;
+      while ((n = walk.nextNode())) {
+        const t = n.textContent.trim();
+        if (t) parts.push(t);
+      }
+      raw = parts.join(' ');
+    }
+    // Strip leftover icon ligature names
+    raw = raw.replace(ICON_NOISE, '').replace(/\s{2,}/g, ' ').trim();
+    if (!raw) return 'Turn';
+    const MAX = 20;
+    return raw.length > MAX ? raw.slice(0, MAX) + '...' : raw;
   }
 
   function findTurns() {
@@ -377,6 +421,67 @@
     console.groupEnd();
   }
 
+  // == Refresh labels after streaming settles ==
+  function refreshLabels() {
+    var changed = false;
+    nodes.forEach(function(node) {
+      var fresh = getLabel(node.userEl);
+      if (fresh !== node.label && fresh !== 'Turn') {
+        node.label = fresh;
+        changed = true;
+      }
+    });
+    if (changed) renderGraph();
+  }
+
+  // == URL change detection (SPA navigation) ==
+  function checkUrlChange() {
+    if (location.href !== lastUrl) {
+      console.log('[Aether] URL changed: ' + lastUrl + ' -> ' + location.href);
+      lastUrl = location.href;
+      resetState();
+    }
+  }
+
+  function resetState() {
+    // Clear all aether tags from DOM
+    document.querySelectorAll('[' + PROCESSED + ']').forEach(function(el) {
+      el.removeAttribute(PROCESSED);
+      el.removeAttribute(GROUP_ATTR);
+      el.classList.remove(UNIT_CLS, KEEP_CLS, HIDEABLE, HIDDEN_CLS, COLLAPSED);
+    });
+    document.querySelectorAll('.aether-action-bar, .aether-branch-bar').forEach(function(el) {
+      el.remove();
+    });
+    // Reset JS state
+    groupCount = 0;
+    nodes.length = 0;
+    branches.length = 0;
+    branches.push({ id: 0, color: COLORS[0], fromNode: null });
+    activeNodeId = null;
+    visibleSet.clear();
+    renderGraph();
+    // Re-scan with retries for SPA lazy-load
+    initialScan();
+  }
+
+  // == Initial scan with retries ==
+  function initialScan() {
+    var attempts = 0;
+    var maxAttempts = 8;
+    function tryOnce() {
+      run();
+      refreshLabels();
+      attempts++;
+      if (nodes.length === 0 && attempts < maxAttempts) {
+        setTimeout(tryOnce, 800 * attempts);
+      } else {
+        console.log('[Aether] Initial scan done: ' + nodes.length + ' nodes after ' + attempts + ' attempt(s)');
+      }
+    }
+    tryOnce();
+  }
+
   // == Main ==
   function run() {
     var groups = buildGroups();
@@ -384,18 +489,43 @@
     captureOrphans();
   }
 
+  // Debounced run — waits for streaming to settle
+  function scheduleRun() {
+    if (runTimer) clearTimeout(runTimer);
+    runTimer = setTimeout(function() {
+      runTimer = null;
+      run();
+      refreshLabels();
+    }, RUN_DEBOUNCE);
+  }
+
   createSidebar();
   setupIntersection();
 
   var mutObs = new MutationObserver(function(muts) {
+    var hasNew = false;
     for (var i = 0; i < muts.length; i++) {
-      if (muts[i].addedNodes.length) { requestAnimationFrame(run); return; }
+      if (muts[i].addedNodes.length) { hasNew = true; break; }
     }
+    if (hasNew) scheduleRun();
+    checkUrlChange();
   });
   mutObs.observe(document.body, { childList: true, subtree: true });
 
+  // Also detect History API navigation (pushState/replaceState)
+  var origPush = history.pushState;
+  var origReplace = history.replaceState;
+  history.pushState = function() {
+    origPush.apply(this, arguments);
+    setTimeout(checkUrlChange, 100);
+  };
+  history.replaceState = function() {
+    origReplace.apply(this, arguments);
+    setTimeout(checkUrlChange, 100);
+  };
+  window.addEventListener('popstate', function() { setTimeout(checkUrlChange, 100); });
+
   console.log('[Aether] Loaded on ' + location.href);
-  run();
-  setTimeout(run, 2000);
-  setTimeout(function() { run(); diagnose(); }, 5000);
+  initialScan();
+  setTimeout(function() { refreshLabels(); diagnose(); }, 5000);
 })();
