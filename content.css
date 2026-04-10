@@ -207,6 +207,20 @@
 .aether-toggle--open { left: 280px; }
 .aether-toggle-icon { pointer-events: none; }
 
+/* Dice / Network toggle — positioned below the tree toggle */
+.aether-network-toggle {
+  top: calc(50% + 34px);
+}
+.aether-toggle--active {
+  background: rgba(100,60,180,0.75) !important;
+  color: #fff !important;
+  border-color: rgba(179,157,219,0.4) !important;
+}
+.aether-toggle--network-shift {
+  left: 70vw !important;
+  transition: left 500ms ease-in-out;
+}
+
 
 /* Panel */
 .aether-sidebar {
@@ -218,7 +232,8 @@
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border-right: 1px solid rgba(255,255,255,0.07);
   transform: translateX(-100%);
-  transition: transform 300ms cubic-bezier(0.4,0,0.2,1);
+  transition: transform 300ms cubic-bezier(0.4,0,0.2,1),
+              width 500ms ease-in-out;
   z-index: 10000;
   display: flex; flex-direction: column;
   font-family: 'Google Sans','Roboto',system-ui,sans-serif;
@@ -226,6 +241,11 @@
 }
 
 .aether-sidebar--open { transform: translateX(0); }
+
+/* NETWORK mode: sidebar expands to 70vw */
+.aether-sidebar--network {
+  width: 70vw;
+}
 
 
 /* Header */
@@ -845,4 +865,90 @@ svg .aether-fade-out {
     background: rgba(0,0,0,0.1);
     color: rgba(0,0,0,0.85);
   }
+
+  /* Network mode light overrides */
+  .aether-network-tooltip {
+    background: rgba(255,255,255,0.96);
+    color: rgba(0,0,0,0.85);
+    border-color: rgba(0,0,0,0.12);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  }
+  .aether-net-label { fill: rgba(0,0,0,0.65) !important; }
+  .aether-toggle--active {
+    background: rgba(120,80,200,0.8) !important;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   NETWORK VIEW (D3 Force Graph)
+   ═══════════════════════════════════════════════════════════════ */
+
+.aether-network-canvas {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  overflow: hidden;
+  /* DEBUG: red tint to confirm canvas exists and has size */
+  background: rgba(255,0,0,0.1);
+}
+
+.aether-network-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Parent-child links */
+.aether-net-link {
+  stroke-linecap: round;
+  transition: opacity 200ms ease;
+}
+
+/* Semantic links — lavender flowing dashed */
+.aether-net-semantic {
+  stroke-linecap: round;
+  animation: aether-semantic-flow 1.2s linear infinite;
+  transition: stroke 200ms ease, stroke-width 200ms ease, opacity 200ms ease;
+}
+
+@keyframes aether-semantic-flow {
+  to { stroke-dashoffset: -20; }
+}
+
+/* Nodes */
+.aether-net-node {
+  transition: fill-opacity 200ms ease, stroke-opacity 200ms ease, r 150ms ease;
+}
+.aether-net-node:hover {
+  r: 11;
+  fill-opacity: 0.5;
+  stroke-opacity: 1;
+}
+
+/* Labels */
+.aether-net-label {
+  font-family: 'Google Sans','Roboto',system-ui,sans-serif;
+  fill: rgba(255,255,255,0.7);
+  pointer-events: none;
+  transition: fill 200ms ease;
+}
+
+/* Tooltip */
+.aether-network-tooltip {
+  position: absolute;
+  z-index: 10;
+  padding: 8px 12px;
+  font-family: 'Google Sans','Roboto',system-ui,sans-serif;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.9);
+  background: rgba(28,28,28,0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  pointer-events: none;
+  max-width: 240px;
+  white-space: nowrap;
 }

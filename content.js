@@ -41,6 +41,8 @@
   let activeBranchId = 0;
   let activeNodeId = null;
   let sidebarOpen = false;
+  let viewMode = 'TREE'; // 'TREE' | 'NETWORK'
+  let networkBtn = null;
   let sidebar, svgEl, labelBox, toggleBtn, intersectionObs, statusBarEl, ctxMenu;
   const visibleSet = new Set();
   let runTimer = null;
@@ -1271,6 +1273,7 @@
 
   // == Sidebar ==
   function createSidebar() {
+    // ─ Tree toggle (🌿) ─
     toggleBtn = document.createElement('button');
     toggleBtn.className = 'aether-sidebar-toggle';
     toggleBtn.innerHTML = '<span class="aether-toggle-icon">\uD83C\uDF3F</span>';
@@ -1279,8 +1282,24 @@
       sidebarOpen = !sidebarOpen;
       sidebar.classList.toggle('aether-sidebar--open', sidebarOpen);
       toggleBtn.classList.toggle('aether-toggle--open', sidebarOpen);
+      if (!sidebarOpen && viewMode === 'NETWORK') switchViewMode('TREE');
     });
     document.body.appendChild(toggleBtn);
+
+    // ─ Network toggle (🎲) ─
+    networkBtn = document.createElement('button');
+    networkBtn.className = 'aether-sidebar-toggle aether-network-toggle';
+    networkBtn.innerHTML = '<span class="aether-toggle-icon">\uD83C\uDFB2</span>';
+    networkBtn.title = 'Network View';
+    networkBtn.addEventListener('click', function () {
+      if (!sidebarOpen) {
+        sidebarOpen = true;
+        sidebar.classList.add('aether-sidebar--open');
+        toggleBtn.classList.add('aether-toggle--open');
+      }
+      switchViewMode(viewMode === 'NETWORK' ? 'TREE' : 'NETWORK');
+    });
+    document.body.appendChild(networkBtn);
 
     sidebar = document.createElement('div');
     sidebar.className = 'aether-sidebar';
@@ -1303,6 +1322,85 @@
     scroll.appendChild(labelBox);
     setupDropZones();
   }
+
+  // == View Mode Switching ==
+  function serializeNodesForBridge() {
+    return nodes.map(function (n) {
+      var text = '';
+      try { text = (n.userEl.innerText || n.userEl.textContent || '').trim(); } catch (e) { /* */ }
+      if (!text) text = n.label || 'Turn';
+      if (text.length > 512) text = text.substring(0, 512);
+      return {
+        id: n.id, label: n.label, branchId: n.branchId,
+        parentId: n.parentId, text: text
+      };
+    });
+  }
+
+  function serializeBranchesForBridge() {
+    return branches.map(function (b) {
+      if (!b) return null;
+      return { id: b.id, name: b.name, color: b.color, fromNode: b.fromNode };
+    }).filter(Boolean);
+  }
+
+  function switchViewMode(mode) {
+    if (mode === viewMode) return;
+    viewMode = mode;
+    var isNet = mode === 'NETWORK';
+    sidebar.classList.toggle('aether-sidebar--network', isNet);
+    networkBtn.classList.toggle('aether-toggle--active', isNet);
+    toggleBtn.classList.toggle('aether-toggle--network-shift', isNet);
+    networkBtn.classList.toggle('aether-toggle--network-shift', isNet);
+    console.log('[Aether] switchViewMode → ' + mode);
+
+    if (mode === 'NETWORK') {
+      svgEl.style.display = 'none';
+      labelBox.style.display = 'none';
+      var title = sidebar.querySelector('.aether-sidebar-title');
+      if (title) title.textContent = 'AetherMind Network';
+      var scroll = sidebar.querySelector('.aether-sidebar-scroll');
+      scroll.setAttribute('data-aether-network-host', 'true');
+      // Build bridge payload
+      var payload = {
+        nodes: serializeNodesForBridge(),
+        branches: serializeBranchesForBridge(),
+        hostSelector: '[data-aether-network-host="true"]'
+      };
+      console.log('[Aether] Bridge payload: ' + payload.nodes.length + ' nodes, ' +
+        payload.branches.length + ' branches');
+      console.log('[Aether] Dispatching aether:activate-network in 500ms...');
+      // 500ms delay to ensure MAIN world scripts are ready
+      setTimeout(function () {
+        console.log('[Aether] Dispatching aether:activate-network NOW');
+        document.dispatchEvent(new CustomEvent('aether:activate-network', {
+          detail: payload
+        }));
+      }, 500);
+    } else {
+      console.log('[Aether] Switching to TREE mode');
+      document.dispatchEvent(new CustomEvent('aether:deactivate-network'));
+      svgEl.style.display = '';
+      labelBox.style.display = '';
+      var title = sidebar.querySelector('.aether-sidebar-title');
+      if (title) title.textContent = 'AetherMind Graph';
+      var scroll = sidebar.querySelector('.aether-sidebar-scroll');
+      scroll.removeAttribute('data-aether-network-host');
+      renderGraph();
+    }
+  }
+
+  // Listen for network node clicks from MAIN world
+  document.addEventListener('aether:network-click', function (e) {
+    var detail = e.detail;
+    if (detail && detail.nodeId != null) {
+      console.log('[Aether] network-click → node #' + detail.nodeId);
+      scrollToNode(detail.nodeId);
+      if (detail.branchId != null && detail.branchId !== activeBranchId) {
+        switchBranch(detail.branchId);
+      }
+    }
+  });
 
   // == Graph Rendering ==
   var G = { r: 5, gap: 48, colW: 18, pL: 24, pT: 24 };
@@ -1691,7 +1789,12 @@
   var mutObs = new MutationObserver(function(muts) {
     var hasNew = false;
     for (var i = 0; i < muts.length; i++) {
-      if (muts[i].addedNodes.length) { hasNew = true; break; }
+      var m = muts[i];
+      if (m.target && m.target.closest && m.target.closest(
+        '.aether-sidebar, .aether-network-canvas, .aether-network-tooltip, ' +
+        '.aether-ctx-menu, .aether-branch-dialog-overlay, .aether-drag-ghost'
+      )) continue;
+      if (m.addedNodes.length) { hasNew = true; break; }
     }
     if (hasNew) scheduleRun();
     checkUrlChange();
