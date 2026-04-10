@@ -144,34 +144,144 @@
 
   function buildGraphData(aetherNodes, aetherBranches) {
     var nodeMap = {};
-    nodesData = aetherNodes.map(function (n) {
-      var br = null;
-      for (var i = 0; i < aetherBranches.length; i++) {
-        if (aetherBranches[i] && aetherBranches[i].id === n.branchId) { br = aetherBranches[i]; break; }
+    var branchMap = {};
+    aetherBranches.forEach(function (b) { if (b) branchMap[b.id] = b; });
+
+    // Build children map for BFS depth computation
+    var childrenOf = {}; // parentId -> [childId, ...]
+    aetherNodes.forEach(function (n) {
+      if (n.parentId != null) {
+        if (!childrenOf[n.parentId]) childrenOf[n.parentId] = [];
+        childrenOf[n.parentId].push(n.id);
       }
+    });
+
+    // Find root nodes (no parent or parent not in set)
+    var allIds = new Set(aetherNodes.map(function (n) { return n.id; }));
+    var roots = aetherNodes.filter(function (n) {
+      return n.parentId == null || !allIds.has(n.parentId);
+    });
+
+    // BFS to compute depth and sibling index
+    var depthOf = {};  // nodeId -> depth
+    var siblingIdx = {}; // nodeId -> index among siblings
+    var siblingCnt = {}; // nodeId -> total sibling count
+    var maxDepth = 0;
+    var queue = [];
+    roots.forEach(function (r, i) {
+      depthOf[r.id] = 0;
+      siblingIdx[r.id] = i;
+      siblingCnt[r.id] = roots.length;
+      queue.push(r.id);
+    });
+    while (queue.length > 0) {
+      var cur = queue.shift();
+      var children = childrenOf[cur] || [];
+      for (var ci = 0; ci < children.length; ci++) {
+        var cid = children[ci];
+        if (depthOf[cid] == null) {
+          depthOf[cid] = depthOf[cur] + 1;
+          siblingIdx[cid] = ci;
+          siblingCnt[cid] = children.length;
+          if (depthOf[cid] > maxDepth) maxDepth = depthOf[cid];
+          queue.push(cid);
+        }
+      }
+    }
+
+    // Collect unique branch IDs in order for angular spread
+    var branchIds = [];
+    var branchSet = new Set();
+    aetherNodes.forEach(function (n) {
+      if (!branchSet.has(n.branchId)) { branchSet.add(n.branchId); branchIds.push(n.branchId); }
+    });
+
+    // Build node data with tree-aware initial positions
+    var DEPTH_SPACING = 55;
+    var BRANCH_ANGLE_STEP = branchIds.length > 1 ? (Math.PI * 1.5) / branchIds.length : 0;
+    var BASE_ANGLE = -Math.PI / 2; // start from top
+
+    nodesData = aetherNodes.map(function (n) {
+      var br = branchMap[n.branchId] || null;
+      var depth = depthOf[n.id] != null ? depthOf[n.id] : 0;
+      var bIdx = branchIds.indexOf(n.branchId);
+
+      // Initial position: radial layout based on depth + branch angle
+      var angle, radius;
+      if (branchIds.length <= 1) {
+        // Single branch: vertical layout
+        angle = Math.PI / 2; // downward
+        radius = depth * DEPTH_SPACING;
+      } else {
+        // Multi-branch: fan out from center, main trunk goes down
+        if (n.branchId === 0) {
+          angle = Math.PI / 2;
+        } else {
+          angle = BASE_ANGLE + bIdx * BRANCH_ANGLE_STEP;
+        }
+        radius = depth * DEPTH_SPACING;
+      }
+
+      // Spread siblings horizontally at same depth
+      var sibOff = 0;
+      if ((siblingCnt[n.id] || 1) > 1) {
+        var total = siblingCnt[n.id];
+        sibOff = ((siblingIdx[n.id] || 0) - (total - 1) / 2) * 30;
+      }
+
+      var initX = width / 2 + Math.cos(angle) * radius + sibOff * Math.cos(angle + Math.PI / 2);
+      var initY = height / 2 + Math.sin(angle) * radius + sibOff * Math.sin(angle + Math.PI / 2);
+
       var obj = {
         id: n.id,
         label: n.label || 'Turn',
         branchId: n.branchId,
         parentId: n.parentId,
+        depth: depth,
         color: br ? br.color : '#4285f4',
-        x: width / 2 + (Math.random() - 0.5) * 20,
-        y: height / 2 + (Math.random() - 0.5) * 20,
+        x: initX,
+        y: initY,
       };
       nodeMap[n.id] = obj;
       return obj;
     });
 
+    // Build links strictly from parentId (no array-order links!)
+    // Fallback: orphan nodes whose parentId is missing get connected to
+    // the last node on main branch (branchId 0) to prevent them floating loose.
     linksData = [];
+    var lastMainNodeId = null;
     aetherNodes.forEach(function (n) {
-      if (n.parentId != null && nodeMap[n.parentId]) {
-        linksData.push({
-          source: n.parentId,
-          target: n.id,
-          type: 'parent',
-          color: nodeMap[n.id].color,
-        });
+      if (n.branchId === 0) lastMainNodeId = n.id;
+    });
+
+    aetherNodes.forEach(function (n) {
+      if (n.parentId != null) {
+        if (nodeMap[n.parentId]) {
+          linksData.push({
+            source: n.parentId,
+            target: n.id,
+            type: 'parent',
+            color: nodeMap[n.id].color,
+          });
+        } else if (lastMainNodeId != null && n.id !== lastMainNodeId) {
+          // Orphan: parent not found — fallback to last main-branch node
+          console.warn('[AetherNet] Orphan node #' + n.id + ' (parentId=' + n.parentId +
+            ' missing) → fallback to main #' + lastMainNodeId);
+          linksData.push({
+            source: lastMainNodeId,
+            target: n.id,
+            type: 'parent',
+            color: nodeMap[n.id].color,
+          });
+        }
       }
+    });
+
+    // Diagnostic: log link topology
+    console.log('[AetherNet] Link map:');
+    linksData.forEach(function (l) {
+      console.log('  ' + l.source + ' → ' + l.target + ' (color=' + l.color + ')');
     });
 
     // Semantic links from AetherEmbed (same MAIN world)
@@ -190,8 +300,15 @@
         }
       });
     }
+
+    // Log fork points (nodes with >1 child)
+    var forkCount = 0;
+    Object.keys(childrenOf).forEach(function (pid) {
+      if (childrenOf[pid].length > 1) forkCount++;
+    });
     console.log('[AetherNet] Graph data: ' + nodesData.length + ' nodes, ' +
-      linksData.length + ' parent links, ' + semanticData.length + ' semantic links');
+      linksData.length + ' parent links, ' + semanticData.length + ' semantic links, ' +
+      forkCount + ' fork points, maxDepth=' + maxDepth);
     return { nodes: nodesData, parentLinks: linksData, semanticLinks: semanticData };
   }
 
@@ -205,18 +322,24 @@
     if (simulation) simulation.stop();
 
     simulation = d3.forceSimulation(nodesData)
-      .force('charge', d3.forceManyBody().strength(-180))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(28))
+      // Strong repulsion — pushes fork siblings apart like umbrella ribs
+      .force('charge', d3.forceManyBody().strength(-400).distanceMax(500))
+      // Keep graph centered in viewport
+      .force('center', d3.forceCenter(width / 2, height / 2).strength(0.05))
+      // Collision: large radius prevents label overlap at fork points
+      .force('collision', d3.forceCollide().radius(40).strength(0.8).iterations(2))
+      // Parent-child links: short & rigid to maintain tree structure
       .force('parentLinks', d3.forceLink(linksData)
         .id(function (d) { return d.id; })
-        .distance(60)
-        .strength(0.8))
+        .distance(50)
+        .strength(1.0))
+      // Semantic links: longer, weaker — decorative connections
       .force('semanticLinks', d3.forceLink(semanticData)
         .id(function (d) { return d.id; })
-        .distance(120)
-        .strength(function (d) { return (d.score || 0.5) * 0.2; }))
-      .alphaDecay(0.02)
+        .distance(150)
+        .strength(function (d) { return (d.score || 0.5) * 0.15; }))
+      .alphaDecay(0.018)
+      .velocityDecay(0.35)
       .on('tick', ticked);
   }
 
@@ -238,11 +361,11 @@
     linkSel.exit().remove();
     linkSel.enter().append('line')
       .attr('class', 'aether-net-link')
-      .attr('stroke-width', 1.5)
+      .attr('stroke-width', 2)
       .attr('stroke-linecap', 'round')
       .merge(linkSel)
       .attr('stroke', function (d) { return d.color; })
-      .attr('opacity', 0.5);
+      .attr('opacity', 0.65);
 
     // Semantic edges (lavender dashed)
     var semSel = gSemanticLinks.selectAll('line.aether-net-semantic')
@@ -368,7 +491,7 @@
       .attr('opacity', function (d) {
         var sId = typeof d.source === 'object' ? d.source.id : d.source;
         var tId = typeof d.target === 'object' ? d.target.id : d.target;
-        return (sId === nodeId || tId === nodeId) ? 0.6 : 0.1;
+        return (sId === nodeId || tId === nodeId) ? 0.85 : 0.15;
       });
 
     var relatedIds = new Set([nodeId]);
@@ -404,7 +527,7 @@
       .attr('stroke-width', 1.2)
       .attr('opacity', 0.35);
     gLinks.selectAll('line.aether-net-link')
-      .attr('opacity', 0.5);
+      .attr('opacity', 0.65);
     gNodes.selectAll('circle.aether-net-node')
       .attr('fill-opacity', 0.2)
       .attr('stroke-opacity', 0.8);
@@ -416,9 +539,16 @@
   // ══════════════════════════════════════════════════════════════
 
   function explosionEnter() {
+    // Start all nodes at center, then let the simulation "explode" them outward
+    // Nodes keep their tree-aware initial offsets but are compressed toward center
+    var cx = width / 2, cy = height / 2;
     nodesData.forEach(function (d) {
-      d.x = width / 2 + (Math.random() - 0.5) * 30;
-      d.y = height / 2 + (Math.random() - 0.5) * 30;
+      // Compress toward center but preserve direction from initial layout
+      var dx = d.x - cx, dy = d.y - cy;
+      var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      // Start close to center (15% of computed position) so the explosion is visible
+      d.x = cx + (dx / dist) * Math.min(dist * 0.15, 20) + (Math.random() - 0.5) * 8;
+      d.y = cy + (dy / dist) * Math.min(dist * 0.15, 20) + (Math.random() - 0.5) * 8;
     });
     if (simulation) simulation.alpha(1).restart();
   }

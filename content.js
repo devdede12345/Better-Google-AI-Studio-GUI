@@ -432,6 +432,30 @@
       }
     }
 
+    // Reconstruct missing parentId values (for saves made before parentId was tracked)
+    var repaired = 0;
+    var prevOnBranch = {}; // branchId -> last seen node id
+    nodes.forEach(function(n) {
+      if (n.parentId == null) {
+        if (n.branchId === 0) {
+          // Main branch: chain to previous main-branch node
+          n.parentId = prevOnBranch[0] != null ? prevOnBranch[0] : null;
+        } else {
+          // Sub-branch: first node connects to branch fork point
+          var br = getBranch(n.branchId);
+          n.parentId = prevOnBranch[n.branchId] != null
+            ? prevOnBranch[n.branchId]
+            : (br ? br.fromNode : null);
+        }
+        if (n.parentId != null) repaired++;
+      }
+      prevOnBranch[n.branchId] = n.id;
+    });
+    if (repaired > 0) {
+      console.log('[Aether] Repaired ' + repaired + ' missing parentId(s)');
+      autoSave();
+    }
+
     console.log('[Aether] Rehydrated: ' + matched + ' matched, ' + lost + ' lost, ' + nodes.length + ' total');
     applyFocusMode();
     updateStatusBar();
@@ -1381,6 +1405,15 @@
       };
       console.log('[Aether] Bridge payload: ' + payload.nodes.length + ' nodes, ' +
         payload.branches.length + ' branches');
+      // Diagnostic: log parentId chain for every node
+      payload.nodes.forEach(function (n) {
+        console.log('[Aether] Node #' + n.id + ' branch=' + n.branchId +
+          ' parentId=' + n.parentId + ' label="' + n.label + '"');
+      });
+      payload.branches.forEach(function (b) {
+        console.log('[Aether] Branch #' + b.id + ' "' + b.name + '" color=' + b.color +
+          ' fromNode=' + b.fromNode);
+      });
       console.log('[Aether] Dispatching aether:activate-network in 500ms...');
       // 500ms delay to ensure MAIN world scripts are ready
       setTimeout(function () {
