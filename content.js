@@ -186,10 +186,10 @@
       }
       raw = parts.join(' ');
     }
-    // Strip leftover icon ligature names
-    raw = raw.replace(ICON_NOISE, '').replace(/\s{2,}/g, ' ').trim();
+    // Strip leftover icon ligature names and newlines
+    raw = raw.replace(ICON_NOISE, '').replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
     if (!raw) return 'Turn';
-    const MAX = 20;
+    const MAX = 25;
     return raw.length > MAX ? raw.slice(0, MAX) + '...' : raw;
   }
 
@@ -436,6 +436,8 @@
     applyFocusMode();
     updateStatusBar();
     renderGraph();
+    // Kick off async resolution for any stale "Turn" labels
+    resolveStaleLabels();
     return true;
   }
 
@@ -474,13 +476,23 @@
     }
 
     // Restore node with saved metadata
+    // Always try fresh extraction; only keep saved label if custom-renamed
+    var freshLabel = getLabel(userEl);
+    var useLabel;
+    if (savedNode.custom) {
+      useLabel = savedNode.label;
+    } else if (freshLabel && freshLabel !== 'Turn') {
+      useLabel = freshLabel;
+    } else {
+      useLabel = (savedNode.label && savedNode.label !== 'Turn') ? savedNode.label : freshLabel;
+    }
     var node = {
       id: id,
       branchId: savedNode.branchId,
       parentId: savedNode.parentId,
       userEl: userEl,
       modelEls: modelEls,
-      label: savedNode.custom ? savedNode.label : getLabel(userEl),
+      label: useLabel,
       custom: !!savedNode.custom
     };
     userEl.setAttribute(BRANCH_ATTR, String(node.branchId));
@@ -1712,7 +1724,64 @@
         changed = true;
       }
     });
-    if (changed) renderGraph();
+    if (changed) {
+      renderGraph();
+      autoSave();
+    }
+    // Kick off async resolution for any remaining "Turn" labels
+    resolveStaleLabels();
+  }
+
+  // == Async label resolution — eliminate all "Turn" placeholders ==
+  var _staleLabelTimer = null;
+  function resolveStaleLabels() {
+    if (_staleLabelTimer) return; // already running
+    var maxRetries = 5;
+    var interval = 500;
+    var attempt = 0;
+
+    function tick() {
+      attempt++;
+      var stale = nodes.filter(function(n) {
+        return !n.custom && (!n.label || n.label === 'Turn');
+      });
+      if (stale.length === 0 || attempt > maxRetries) {
+        _staleLabelTimer = null;
+        if (stale.length === 0) {
+          console.log('[Aether] All labels resolved (attempt ' + attempt + ')');
+        } else {
+          console.log('[Aether] ' + stale.length + ' label(s) still "Turn" after ' + maxRetries + ' retries');
+        }
+        return;
+      }
+      var changed = false;
+      stale.forEach(function(node) {
+        var fresh = getLabel(node.userEl);
+        if (fresh && fresh !== 'Turn') {
+          node.label = fresh;
+          changed = true;
+        }
+      });
+      if (changed) {
+        renderGraph();
+        autoSave();
+        console.log('[Aether] resolveStaleLabels: updated labels (attempt ' + attempt + ')');
+      }
+      // Check if more remain
+      var remaining = nodes.filter(function(n) {
+        return !n.custom && (!n.label || n.label === 'Turn');
+      });
+      if (remaining.length > 0 && attempt < maxRetries) {
+        _staleLabelTimer = setTimeout(tick, interval);
+      } else {
+        _staleLabelTimer = null;
+        if (remaining.length === 0) {
+          console.log('[Aether] All labels resolved (attempt ' + attempt + ')');
+        }
+      }
+    }
+
+    _staleLabelTimer = setTimeout(tick, interval);
   }
 
   // == URL change detection (SPA navigation) ==
@@ -1761,6 +1830,8 @@
         setTimeout(tryOnce, 800 * attempts);
       } else {
         console.log('[Aether] Initial scan done: ' + nodes.length + ' nodes after ' + attempts + ' attempt(s)');
+        // Async resolve any remaining "Turn" placeholders
+        resolveStaleLabels();
       }
     }
     tryOnce();
