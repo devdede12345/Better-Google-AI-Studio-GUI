@@ -189,11 +189,18 @@
       }
     }
 
-    // Collect unique branch IDs in order for angular spread
+    // Collect unique branch IDs for angular sectors
     var branchIds = [];
     var branchSet = new Set();
     aetherNodes.forEach(function (n) {
       if (!branchSet.has(n.branchId)) { branchSet.add(n.branchId); branchIds.push(n.branchId); }
+    });
+    var nonMainBranchIds = branchIds.filter(function (bid) { return bid !== 0; });
+    var branchAngleMap = { 0: Math.PI / 2 }; // main trunk downward
+    nonMainBranchIds.forEach(function (bid, i) {
+      // Distribute non-main branches around the circle, offset from trunk
+      var t = (i / Math.max(nonMainBranchIds.length, 1)) * (Math.PI * 2);
+      branchAngleMap[bid] = -Math.PI / 4 + t;
     });
 
     // Build node data with tree-aware initial positions
@@ -207,20 +214,10 @@
       var bIdx = branchIds.indexOf(n.branchId);
 
       // Initial position: radial layout based on depth + branch angle
-      var angle, radius;
-      if (branchIds.length <= 1) {
-        // Single branch: vertical layout
-        angle = Math.PI / 2; // downward
-        radius = depth * DEPTH_SPACING;
-      } else {
-        // Multi-branch: fan out from center, main trunk goes down
-        if (n.branchId === 0) {
-          angle = Math.PI / 2;
-        } else {
-          angle = BASE_ANGLE + bIdx * BRANCH_ANGLE_STEP;
-        }
-        radius = depth * DEPTH_SPACING;
-      }
+      var angle = branchIds.length <= 1
+        ? Math.PI / 2
+        : (branchAngleMap[n.branchId] != null ? branchAngleMap[n.branchId] : (BASE_ANGLE + bIdx * BRANCH_ANGLE_STEP));
+      var radius = depth * DEPTH_SPACING;
 
       // Spread siblings horizontally at same depth
       var sibOff = 0;
@@ -232,12 +229,17 @@
       var initX = width / 2 + Math.cos(angle) * radius + sibOff * Math.cos(angle + Math.PI / 2);
       var initY = height / 2 + Math.sin(angle) * radius + sibOff * Math.sin(angle + Math.PI / 2);
 
+      var isFork = (childrenOf[n.id] && childrenOf[n.id].length > 1);
+      var isRoot = n.parentId == null || !allIds.has(n.parentId);
       var obj = {
         id: n.id,
         label: n.label || 'Turn',
         branchId: n.branchId,
         parentId: n.parentId,
         depth: depth,
+        branchAngle: angle,
+        isFork: isFork,
+        isRoot: isRoot,
         color: br ? br.color : '#4285f4',
         x: initX,
         y: initY,
@@ -321,26 +323,59 @@
     if (!d3) return;
     if (simulation) simulation.stop();
 
+    var cx = width / 2;
+    var cy = height / 2;
+    var pinnedRoot = null;
+    nodesData.forEach(function (d) {
+      d.fx = null; d.fy = null;
+      if (!pinnedRoot && d.isRoot) pinnedRoot = d;
+    });
+    if (!pinnedRoot && nodesData.length) pinnedRoot = nodesData[0];
+    if (pinnedRoot) {
+      pinnedRoot.fx = cx;
+      pinnedRoot.fy = cy;
+    }
+
     simulation = d3.forceSimulation(nodesData)
-      // Strong repulsion — pushes fork siblings apart like umbrella ribs
-      .force('charge', d3.forceManyBody().strength(-400).distanceMax(500))
+      // Strong repulsion for branch separation
+      .force('charge', d3.forceManyBody()
+        .strength(function (d) { return d.isFork ? -650 : -500; })
+        .distanceMax(600))
       // Keep graph centered in viewport
-      .force('center', d3.forceCenter(width / 2, height / 2).strength(0.05))
-      // Collision: large radius prevents label overlap at fork points
-      .force('collision', d3.forceCollide().radius(40).strength(0.8).iterations(2))
-      // Parent-child links: short & rigid to maintain tree structure
+      .force('center', d3.forceCenter(cx, cy).strength(0.03))
+      // Collision: prevent label overlap in branch clusters
+      .force('collision', d3.forceCollide().radius(55).strength(0.85).iterations(2))
+      // Parent-child links: longer and elastic
       .force('parentLinks', d3.forceLink(linksData)
         .id(function (d) { return d.id; })
-        .distance(50)
-        .strength(1.0))
-      // Semantic links: longer, weaker — decorative connections
+        .distance(120)
+        .strength(0.35))
+      // Semantic links: weak decorative connections
       .force('semanticLinks', d3.forceLink(semanticData)
         .id(function (d) { return d.id; })
-        .distance(150)
-        .strength(function (d) { return (d.score || 0.5) * 0.15; }))
-      .alphaDecay(0.018)
-      .velocityDecay(0.35)
+        .distance(220)
+        .strength(function (d) { return (d.score || 0.5) * 0.04; }))
+      // Radial depth force
+      .force('radial', d3.forceRadial(function (d) {
+        if (d === pinnedRoot) return 0;
+        return Math.max(90, (d.depth || 1) * 120);
+      }, cx, cy).strength(0.08))
+      .alphaDecay(0.014)
+      .velocityDecay(0.3)
       .on('tick', ticked);
+
+    // Branch angle sector force
+    simulation.force('branchAngle', function (alpha) {
+      var k = 0.12 * alpha;
+      nodesData.forEach(function (d) {
+        if (d === pinnedRoot) return;
+        var r = Math.max(90, (d.depth || 1) * 120);
+        var tx = cx + Math.cos(d.branchAngle || (Math.PI / 2)) * r;
+        var ty = cy + Math.sin(d.branchAngle || (Math.PI / 2)) * r;
+        d.vx += (tx - d.x) * k;
+        d.vy += (ty - d.y) * k;
+      });
+    });
   }
 
   // ══════════════════════════════════════════════════════════════

@@ -283,16 +283,17 @@
 
     // Graph node — assign to active branch, compute correct parentId
     var parentId = null;
+    var lastOnBranch = null;
+    for (var ni = nodes.length - 1; ni >= 0; ni--) {
+      if (nodes[ni].branchId === activeBranchId) { lastOnBranch = nodes[ni]; break; }
+    }
     if (activeBranchId > 0) {
       // On a sub-branch: chain to last node on same branch, or fork point
-      var lastOnBranch = null;
-      for (var ni = nodes.length - 1; ni >= 0; ni--) {
-        if (nodes[ni].branchId === activeBranchId) { lastOnBranch = nodes[ni]; break; }
-      }
       var activeBr = getBranch(activeBranchId);
       parentId = lastOnBranch ? lastOnBranch.id : (activeBr ? activeBr.fromNode : null);
     } else {
-      parentId = nodes.length > 0 ? nodes[nodes.length - 1].id : null;
+      // Main branch: chain to last MAIN branch node only
+      parentId = lastOnBranch ? lastOnBranch.id : null;
     }
     const node = {
       id, branchId: activeBranchId,
