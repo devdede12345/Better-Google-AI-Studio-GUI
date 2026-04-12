@@ -42,7 +42,7 @@
   let activeNodeId = null;
   let sidebarOpen = false;
   let viewMode = 'TREE'; // 'TREE' | 'NETWORK'
-  let networkBtn = null;
+  let networkSwitch = null;
   let sidebar, svgEl, labelBox, toggleBtn, intersectionObs, statusBarEl, ctxMenu;
   const visibleSet = new Set();
   let runTimer = null;
@@ -95,6 +95,26 @@
   function autoSave() {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(function() { saveTimer = null; saveState(); }, 300);
+  }
+
+  function saveNetworkPref(enabled) {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ aetherNetworkEnabled: !!enabled });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function loadNetworkPref(cb) {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get('aetherNetworkEnabled', function (r) {
+          cb(!!r.aetherNetworkEnabled);
+        });
+        return;
+      }
+    } catch (e) { /* ignore */ }
+    cb(false);
   }
 
   function loadState(cb) {
@@ -1319,24 +1339,12 @@
       sidebarOpen = !sidebarOpen;
       sidebar.classList.toggle('aether-sidebar--open', sidebarOpen);
       toggleBtn.classList.toggle('aether-toggle--open', sidebarOpen);
-      if (!sidebarOpen && viewMode === 'NETWORK') switchViewMode('TREE');
+      if (!sidebarOpen && viewMode === 'NETWORK') {
+        switchViewMode('TREE');
+        saveNetworkPref(false);
+      }
     });
     document.body.appendChild(toggleBtn);
-
-    // ─ Network toggle (🎲) ─
-    networkBtn = document.createElement('button');
-    networkBtn.className = 'aether-sidebar-toggle aether-network-toggle';
-    networkBtn.innerHTML = '<span class="aether-toggle-icon">\uD83C\uDFB2</span>';
-    networkBtn.title = 'Network View';
-    networkBtn.addEventListener('click', function () {
-      if (!sidebarOpen) {
-        sidebarOpen = true;
-        sidebar.classList.add('aether-sidebar--open');
-        toggleBtn.classList.add('aether-toggle--open');
-      }
-      switchViewMode(viewMode === 'NETWORK' ? 'TREE' : 'NETWORK');
-    });
-    document.body.appendChild(networkBtn);
 
     sidebar = document.createElement('div');
     sidebar.className = 'aether-sidebar';
@@ -1345,10 +1353,24 @@
         '<span class="aether-sidebar-title">AetherMind Graph</span>' +
         '<span class="aether-save-indicator"></span>' +
         '<span class="aether-sidebar-count"></span>' +
+        '<label class="aether-network-switch" title="Network Graph">' +
+          '<input type="checkbox" class="aether-network-switch-input">' +
+          '<span class="aether-network-switch-track">' +
+            '<span class="aether-network-switch-thumb"></span>' +
+          '</span>' +
+          '<span class="aether-network-switch-label">\uD83C\uDFB2</span>' +
+        '</label>' +
       '</div>' +
       '<div class="aether-sidebar-scroll"></div>';
     document.body.appendChild(sidebar);
     saveIndicator = sidebar.querySelector('.aether-save-indicator');
+
+    // ─ Network toggle switch (inside header) ─
+    networkSwitch = sidebar.querySelector('.aether-network-switch-input');
+    networkSwitch.addEventListener('change', function () {
+      switchViewMode(this.checked ? 'NETWORK' : 'TREE');
+      saveNetworkPref(this.checked);
+    });
 
     const scroll = sidebar.querySelector('.aether-sidebar-scroll');
     svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1386,9 +1408,8 @@
     viewMode = mode;
     var isNet = mode === 'NETWORK';
     sidebar.classList.toggle('aether-sidebar--network', isNet);
-    networkBtn.classList.toggle('aether-toggle--active', isNet);
+    if (networkSwitch) networkSwitch.checked = isNet;
     toggleBtn.classList.toggle('aether-toggle--network-shift', isNet);
-    networkBtn.classList.toggle('aether-toggle--network-shift', isNet);
     console.log('[Aether] switchViewMode → ' + mode);
 
     if (mode === 'NETWORK') {
@@ -1924,5 +1945,19 @@
   createCtxMenu();
   // Load persisted state, then rehydrate or scan
   initFromStorage();
+  // Restore network mode pref (default: off → TREE)
+  loadNetworkPref(function (enabled) {
+    if (enabled && networkSwitch) {
+      // Delay so sidebar & data are ready
+      setTimeout(function () {
+        if (!sidebarOpen) {
+          sidebarOpen = true;
+          sidebar.classList.add('aether-sidebar--open');
+          toggleBtn.classList.add('aether-toggle--open');
+        }
+        switchViewMode('NETWORK');
+      }, 1500);
+    }
+  });
   setTimeout(function() { refreshLabels(); diagnose(); }, 5000);
 })();

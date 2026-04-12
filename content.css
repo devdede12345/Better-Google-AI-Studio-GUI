@@ -207,18 +207,62 @@
 .aether-toggle--open { left: 280px; }
 .aether-toggle-icon { pointer-events: none; }
 
-/* Dice / Network toggle — positioned below the tree toggle */
-.aether-network-toggle {
-  top: calc(50% + 34px);
-}
-.aether-toggle--active {
-  background: rgba(100,60,180,0.75) !important;
-  color: #fff !important;
-  border-color: rgba(179,157,219,0.4) !important;
-}
+/* Tree toggle shifts when network panel is expanded */
 .aether-toggle--network-shift {
   left: 70vw !important;
   transition: left 500ms ease-in-out;
+}
+
+/* ── Network toggle switch (inside sidebar header) ── */
+.aether-network-switch {
+  display: flex; align-items: center; gap: 6px;
+  cursor: pointer;
+  margin-left: 8px;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.aether-network-switch-input {
+  position: absolute; opacity: 0; width: 0; height: 0;
+}
+.aether-network-switch-track {
+  position: relative;
+  width: 32px; height: 16px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 8px;
+  transition: background 250ms ease;
+  flex-shrink: 0;
+}
+.aether-network-switch-thumb {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 12px; height: 12px;
+  background: rgba(255,255,255,0.45);
+  border-radius: 50%;
+  transition: transform 250ms cubic-bezier(0.4,0,0.2,1),
+              background 250ms ease;
+}
+.aether-network-switch-input:checked + .aether-network-switch-track {
+  background: rgba(149,117,205,0.55);
+}
+.aether-network-switch-input:checked + .aether-network-switch-track .aether-network-switch-thumb {
+  transform: translateX(16px);
+  background: #b39ddb;
+}
+.aether-network-switch-label {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.5;
+  transition: opacity 200ms ease;
+}
+.aether-network-switch-input:checked ~ .aether-network-switch-label {
+  opacity: 1;
+}
+.aether-network-switch:hover .aether-network-switch-track {
+  background: rgba(255,255,255,0.18);
+}
+.aether-network-switch-input:checked:hover + .aether-network-switch-track {
+  background: rgba(149,117,205,0.7);
 }
 
 
@@ -250,20 +294,24 @@
 
 /* Header */
 .aether-sidebar-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 16px 12px;
+  display: flex; align-items: center;
+  gap: 8px;
+  padding: 14px 14px 10px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
 }
 
 .aether-sidebar-title {
   font-size: 13px; font-weight: 600;
   color: rgba(255,255,255,0.85);
   letter-spacing: 0.2px;
+  white-space: nowrap;
 }
 
 .aether-sidebar-count {
   font-size: 11px; font-weight: 400;
   color: rgba(255,255,255,0.35);
+  white-space: nowrap;
 }
 
 .aether-save-indicator {
@@ -273,7 +321,7 @@
   opacity: 0;
   transition: opacity 300ms ease;
   margin-left: auto;
-  margin-right: 6px;
+  margin-right: 0;
   pointer-events: none;
   white-space: nowrap;
 }
@@ -874,8 +922,14 @@ svg .aether-fade-out {
     box-shadow: 0 4px 16px rgba(0,0,0,0.12);
   }
   .aether-net-label { fill: rgba(0,0,0,0.65) !important; }
-  .aether-toggle--active {
-    background: rgba(120,80,200,0.8) !important;
+  .aether-network-switch-track {
+    background: rgba(0,0,0,0.1);
+  }
+  .aether-network-switch-input:checked + .aether-network-switch-track {
+    background: rgba(120,80,200,0.5);
+  }
+  .aether-network-switch-thumb {
+    background: rgba(0,0,0,0.3);
   }
 }
 
