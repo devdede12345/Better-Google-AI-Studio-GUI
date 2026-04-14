@@ -19,7 +19,7 @@
 - **Drag & Drop Reordering:** Move nodes between branches with a "Predictive Ghost Line" preview to reshape your thinking topology in real-time.
 - **Fold / Unfold:** Collapse conversation sections to focus on what matters.
 
-### 🎲 Semantic Neural Graph
+### 🎲 Semantic Network Graph [Under Development]
 
 - **2D Force-Directed Network:** Toggle the network view from the sidebar header to see all conversation nodes as an interactive force graph.
 - **Semantic Links:** Powered by on-device embeddings (all-MiniLM-L6-v2), automatically discovers and visualizes hidden connections between prompts based on meaning — not just sequence.

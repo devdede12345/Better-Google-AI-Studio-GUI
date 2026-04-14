@@ -10,13 +10,13 @@
   "content_scripts": [
     {
       "matches": ["https://aistudio.google.com/*"],
-      "js": ["libs/d3.v7.min.js", "libs/transformers.min.js", "embeddings.js", "network.js"],
+      "js": ["utils/logger.js", "libs/d3.v7.min.js", "libs/transformers.min.js", "embeddings.js", "network.js"],
       "run_at": "document_idle",
       "world": "MAIN"
     },
     {
       "matches": ["https://aistudio.google.com/*"],
-      "js": ["content.js"],
+      "js": ["utils/logger.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
       "world": "ISOLATED"

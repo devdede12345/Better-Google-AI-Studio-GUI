@@ -339,6 +339,30 @@
   padding-bottom: 24px;
 }
 
+/* Footer (debug export) */
+.aether-sidebar-footer {
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: 6px 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+}
+.aether-debug-export {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  color: rgba(255,255,255,0.35);
+  transition: color 200ms ease, border-color 200ms ease, background 200ms ease;
+  outline: none;
+}
+.aether-debug-export:hover {
+  color: rgba(255,255,255,0.8);
+  border-color: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.04);
+}
+
 .aether-sidebar-scroll::-webkit-scrollbar { width: 4px; }
 .aether-sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
 .aether-sidebar-scroll::-webkit-scrollbar-thumb {
