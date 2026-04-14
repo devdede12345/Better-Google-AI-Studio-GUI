@@ -1,11 +1,41 @@
-This project:
-  ☐ 
+Network Graph: @high
+  ☐ Adjust the logic of the network nodes generation
+  ☐ Dynamic force parameters — scale charge/linkDistance based on node count (5 nodes vs 50 nodes need very different values)
+  ☐ Remove debug red tint on .aether-network-canvas (background: rgba(255,0,0,0.1))
+  ☐ Consider Canvas rendering instead of SVG for large conversations (100+ nodes)
 
+Stability & Edge Cases: @high
+  ☐ Harden rehydrate() DOM matching — AI Studio layout changes can break node identification
+  ☐ Test with very long conversations (200+ turns) for performance
+  ☐ Handle multi-tab race conditions on chrome.storage writes
 
-Future Features:
-  ☐ Adjust the logic of the network nodes generation.
-  ☐ (Maybe) auto generate the outline of each prompt
+Code Architecture: @high
+  ☐ Split content.js (~2000 lines) into modules: sidebar, graph, branches, storage
+  ☐ Add a bundler (Webpack/Rollup) while keeping Manifest V3 compatibility
 
+Semantic Embeddings: @medium
+  ☐ Add a similarity threshold slider so users can tune semantic link density
+  ☐ Show faint semantic hints (dashed lines) in the Git tree view, not only in Network view
+  ☐ Evaluate if cosine threshold 0.78 is too strict — lower to ~0.65 and test
+
+User Experience: @medium
+  ☐ Keyboard shortcuts — Ctrl+B to branch, Ctrl+/ to toggle sidebar
+  ☐ Search / filter nodes by keyword in long conversations
+  ☐ Allow users to rename branches (currently auto-named branch-1, branch-2…)
+  ☐ Undo/Redo for drag-drop node moves between branches
+  ☐ Export/Import conversation tree as JSON or Markdown
+  ☐ Auto-generate prompt outlines using Transformers.js summarization
+
+Visual Polish: @low
+  ☐ Improve sidebar 280px → 70vw transition with a stronger ease-out curve
+  ☐ Complete light-mode (prefers-color-scheme) CSS coverage — some elements still unstyled
+  ☐ Add subtle entrance animations for new nodes appearing in the Git tree
+
+Documentation: @low
+  ☐ Fix README Tech Stack — currently says "Vite + React + Tailwind" but project is Vanilla JS
+  ☐ Sync README version badge (1.0.0) with manifest.json (1.1.0)
+  ☐ Add feature screenshots/GIFs for Network Graph and branch operations
+  ☐ Document drag-drop, fold/unfold, semantic links, and other implemented features
 
 ---------------------------------------------------
 //template of the todo list
@@ -15,7 +45,6 @@ Projects:
     ✔ By default those statistics are the number of pending todos and the sum of their time estimates @30m
   Nested:
     ☐ You can nest projects inside each other and fold them
-
 Todos:
   You can write plain text notes/descriptions wherever you want
   New:
@@ -35,7 +64,6 @@ Todos:
       ✔ Now it will show the elapsed time @started(17-11-03 10:42) @done(17-11-03 20:11) @lasted(9h29m)
     ☐ You can provide time estimates for your todos @1h30m
       ☐ We are even doing some natural language processing @est(1 day and 20 minutes)
-
 Formatting:
   You can format text in a markdown-like fashion
   Bold:
@@ -46,7 +74,6 @@ Formatting:
     ☐ Use tildes for ~strikethrough~
   Code:
     ☐ Use backticks for `code`
-
 Archive:
   ✔ You can archive finished todos here
   ✔ Congratulations, you are now a Todo+ master!
